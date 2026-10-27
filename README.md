@@ -19,6 +19,11 @@ relight clip.mp4        # open with a clip on the timeline
 relight trip.relight    # open a project
 ```
 
+The setup `.exe` puts the `relight` command on your PATH (open a new terminal after
+installing) and takes it off when uninstalling. If you also have a copy from
+`npm run install-cli`, whichever comes first on the PATH wins: `cargo uninstall relight`
+leaves the installed one.
+
 **Editing.** One track; clips play end to end. Split, trim by dragging an edge, move by
 dragging, copy/cut/paste, undo/redo. Drag videos in from the media bin. Clips show
 thumbnails and a waveform.
