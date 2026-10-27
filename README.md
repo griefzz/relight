@@ -6,8 +6,10 @@ TypeScript. Cut clips together, then export at full quality or under a Discord s
 ## Requirements
 
 - Windows 10 or 11
-- `ffmpeg` and `ffprobe` 6 or newer on PATH, or next to `relight.exe` (they aren't bundled)
 - An NVIDIA GPU is optional (used for recording)
+
+The installers include ffmpeg. Built from source, relight uses `ffmpeg` and `ffprobe` 6 or
+newer from the PATH.
 
 ## Use
 
@@ -69,23 +71,44 @@ for Windows (WebView2, MSVC build tools).
 npm install
 npm run tauri dev        # run with hot reload
 npm run install-cli      # release build of relight.exe into ~/.cargo/bin (on PATH)
+npm run installers       # the installers, with ffmpeg in them (downloaded first, ~90 MB)
 npm test                 # the window's tests
 cargo test --workspace -- --include-ignored   # from the repo root; the ignored tests need ffmpeg
 cargo run --release -p relight-media --example discord_encode -- clip.mp4 [out.mp4] [--mb 20] [--av1] [--film]
 ```
 
 The last command runs the Discord preset on its own, without the app. Pushes to `main`
-build Windows installers in GitHub Actions; they're attached to the workflow run as
+build the Windows installers in GitHub Actions; they're attached to the workflow run as
 artifacts.
+
+### Releasing
+
+Bump `version` in the root `Cargo.toml`, commit, and push a matching tag:
+
+```sh
+git tag v0.2.0
+git push origin main v0.2.0
+```
+
+The release workflow builds the setup `.exe`, signs it, and publishes it as a GitHub
+release with a `latest.json`. Installed copies look for that at startup and every few
+hours, download a newer version, and offer it in the top bar. Signing needs the
+`TAURI_SIGNING_PRIVATE_KEY` repository secret, whose public half is in `tauri.conf.json`.
+
+The ffmpeg the installers ship with is a pinned build from
+[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), checked against its hash;
+`scripts/fetch-ffmpeg.mjs` says how to move to a newer one.
 
 ## Layout
 
 - `src/`: the React window
 - `src-tauri/`: the app (window, commands, tray, hotkey, settings)
-- `crates/ffmpeg`: running ffmpeg and ffprobe
+- `crates/ffmpeg`: finding and running ffmpeg and ffprobe
 - `crates/media`: timeline rendering, export presets (including Discord), thumbnails and waveforms
 - `crates/recorder`: screen and sound capture
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+relight is MIT: see [LICENSE](LICENSE). The installers also include FFmpeg, which is GPL
+version 3; its license and where to get its source are in the `ffmpeg` folder where relight
+is installed.

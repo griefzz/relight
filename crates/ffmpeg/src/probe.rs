@@ -4,10 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use ffmpeg_sidecar::ffprobe::ffprobe_path;
 use serde::{Deserialize, Serialize};
 
-use crate::hide_window;
+use crate::{ffprobe_path, hide_window};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

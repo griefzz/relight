@@ -72,6 +72,12 @@ button.primary:hover:not(:disabled) {
   border-color: var(--accent-hover);
 }
 
+/* A new version, ready: noticeable without shouting. */
+button.update {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 button:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--accent);

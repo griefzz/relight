@@ -11,6 +11,8 @@
     "core:window:allow-hide",
     "core:window:allow-set-title",
     "dialog:default",
-    "opener:allow-reveal-item-in-dir"
+    "opener:allow-reveal-item-in-dir",
+    "process:allow-restart",
+    "updater:default"
   ]
 }

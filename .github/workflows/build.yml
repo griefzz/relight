@@ -16,9 +16,9 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -44,10 +44,15 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --locked
 
-      - name: Build the installers
-        run: npm run tauri build
+      - name: Get the ffmpeg the installers ship with
+        run: |
+          npm run ffmpeg
+          node scripts/check-ffmpeg.mjs
 
-      - uses: actions/upload-artifact@v4
+      - name: Build the installers
+        run: npm run installers
+
+      - uses: actions/upload-artifact@v7
         with:
           name: relight-windows-${{ github.sha }}
           path: |

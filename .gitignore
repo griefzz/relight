@@ -25,3 +25,6 @@ dist-ssr
 
 # Rust build output (the workspace builds here)
 /target/
+
+# The ffmpeg the installers ship with (npm run ffmpeg fetches it)
+/src-tauri/ffmpeg/

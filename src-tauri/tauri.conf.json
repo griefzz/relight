@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "relight",
-  "version": "0.1.0",
   "identifier": "com.relight.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -45,5 +44,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYyQjEzQUNBNUQ3MzhCQ0YKUldUUGkzTmR5anF4OGpnT1RUdzBKdWVadVNGMVZrd29LR2U2dWJsaFFicjFteGNvWGNOUzF3UkQK",
+      "endpoints": [
+        "https://github.com/griefzz/relight/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

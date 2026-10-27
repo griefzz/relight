@@ -1,0 +1,47 @@
+name: Release
+
+# Pushing a version tag (v0.2.0, matching the version in Cargo.toml) publishes it as a
+# GitHub release: the signed setup .exe, with ffmpeg in it, and the latest.json that
+# installed copies of relight check to update themselves.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag is the app's version
+        run: node scripts/release.mjs check ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      - name: Get the ffmpeg the installer ships with
+        run: |
+          npm run ffmpeg
+          node scripts/check-ffmpeg.mjs
+
+      - name: Build the signed installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.release.conf.json
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release.mjs publish ${{ github.ref_name }}

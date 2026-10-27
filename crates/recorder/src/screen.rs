@@ -6,11 +6,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ffmpeg_sidecar::child::FfmpegChild;
-use ffmpeg_sidecar::command::FfmpegCommand;
 use ffmpeg_sidecar::event::{FfmpegEvent, LogLevel};
 use serde::Serialize;
 
-use relight_ffmpeg::{args, last_lines, start_failed};
+use relight_ffmpeg::{args, command, last_lines, start_failed};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,7 +117,7 @@ impl Capture {
         // ddagrab stamps each frame with when it took it, which wobbles; a steady frame
         // rate (a late frame repeating the one before) is what editing wants. Fragmented
         // MP4 keeps exact timestamps and, written as it goes, survives relight stopping.
-        let mut child = FfmpegCommand::new()
+        let mut child = command()
             .hide_banner()
             .overwrite()
             .args(args!["-f", "lavfi", "-i", graph])

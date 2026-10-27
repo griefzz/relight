@@ -5,16 +5,16 @@ mod probe;
 
 use std::ffi::OsString;
 use std::fmt::Display;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use ffmpeg_sidecar::command::FfmpegCommand;
 use ffmpeg_sidecar::event::{FfmpegEvent, LogLevel};
 use ffmpeg_sidecar::ffmpeg_time_duration::FfmpegTimeDuration;
 use serde::Serialize;
 
-pub use ffmpeg_sidecar::paths::ffmpeg_path;
 pub use files::{Partial, Scratch, remove_soon};
 pub use probe::{AudioInfo, MediaInfo, VideoInfo, probe};
 
@@ -29,6 +29,34 @@ pub const CANCELLED: &str = "Cancelled";
 
 /// Where a clip's video ends up when it only needs measuring.
 pub const NULL_OUTPUT: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// The ffmpeg to run: the one installed with relight (in an `ffmpeg` folder beside it, with
+/// the libraries it needs), else one put next to relight, else whichever is on the PATH.
+pub fn ffmpeg_path() -> &'static Path {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    PATH.get_or_init(|| find("ffmpeg"))
+}
+
+/// The ffprobe to run, found the same way as `ffmpeg_path`.
+pub fn ffprobe_path() -> &'static Path {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    PATH.get_or_init(|| find("ffprobe"))
+}
+
+fn find(tool: &str) -> PathBuf {
+    let file = format!("{tool}{}", std::env::consts::EXE_SUFFIX);
+    let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_owned));
+    beside
+        .into_iter()
+        .flat_map(|dir| [dir.join("ffmpeg").join(&file), dir.join(&file)])
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| tool.into())
+}
+
+/// ffmpeg, ready to be given arguments.
+pub fn command() -> FfmpegCommand {
+    FfmpegCommand::new_with_path(ffmpeg_path())
+}
 
 /// Keeps a console window from flashing up for a command run from the window.
 pub fn hide_window(command: &mut Command) -> &mut Command {
@@ -114,7 +142,7 @@ pub fn run(job: &Job, what: &str, duration: f64, args: Vec<OsString>) -> Result<
     if job.is_cancelled() {
         return Err(CANCELLED.into());
     }
-    let mut child = FfmpegCommand::new().hide_banner().overwrite().args(args).spawn().map_err(start_failed)?;
+    let mut child = command().hide_banner().overwrite().args(args).spawn().map_err(start_failed)?;
 
     let mut errors = Vec::new();
     let events = child.iter().map_err(|e| format!("Couldn't read ffmpeg's output: {e}"))?;

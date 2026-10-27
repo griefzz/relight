@@ -17,6 +17,8 @@ import { requestPreviews } from "./timeline/previews";
 import { Timeline } from "./timeline/Timeline";
 import { fileName } from "./ui/format";
 import { GearIcon } from "./ui/icons";
+import { UpdateButton } from "./updates/UpdateButton";
+import { followUpdates } from "./updates/updates";
 
 /** Something to leave running in the background: what to wait for before closing. */
 async function stillGoing() {
@@ -91,6 +93,8 @@ export default function App() {
     };
   }, [attempt, report]);
 
+  useEffect(() => followUpdates(), []);
+
   // Every video in the bin gets thumbnails and a waveform, made in the background.
   useEffect(() => {
     requestPreviews(Object.keys(useEditor.getState().media));
@@ -164,6 +168,7 @@ export default function App() {
           {dirty && <span className="dirty"> •</span>}
         </span>
         <div className="spacer" />
+        <UpdateButton onError={report} />
         <RecordButton />
         <button className="icon" onClick={() => setShowSettings(true)} title="Settings (Ctrl+,)" aria-label="Settings">
           <GearIcon />
