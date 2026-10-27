@@ -1,0 +1,12 @@
+[package]
+name = "relight-media"
+description = "Rendering timelines, the export presets (full quality and Discord), and timeline previews"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+relight-ffmpeg.workspace = true
+serde.workspace = true
+serde_json.workspace = true

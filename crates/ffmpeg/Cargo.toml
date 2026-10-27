@@ -1,0 +1,13 @@
+[package]
+name = "relight-ffmpeg"
+description = "Running ffmpeg and ffprobe: probing media, progress, cancelling, and the files jobs write"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+ffmpeg-sidecar.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

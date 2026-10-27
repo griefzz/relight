@@ -1,0 +1,27 @@
+[package]
+name = "relight"
+description = "A video editor and screen recorder: cut clips together, export them full quality or sized for Discord"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+relight-ffmpeg.workspace = true
+relight-media.workspace = true
+relight-recorder.workspace = true
+
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2.5.4"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

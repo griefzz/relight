@@ -1,0 +1,57 @@
+name: Build
+
+# Every push to main builds the Windows installers and attaches them to the run as
+# artifacts; pull requests get the same checks and build.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+
+      # Type-checks and builds the window first: the app crate embeds the built window,
+      # so it doesn't compile without it.
+      - name: Check and build the window
+        run: |
+          npm run build
+          npm test
+
+      - name: Check the Rust code
+        # The tests marked ignored run ffmpeg, which the runner doesn't have.
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+
+      - name: Build the installers
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relight-windows-${{ github.sha }}
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+            target/release/relight.exe
+          if-no-files-found: error

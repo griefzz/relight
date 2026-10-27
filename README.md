@@ -1,0 +1,91 @@
+# relight
+
+A video editor and screen recorder for Windows, built with Tauri 2 (Rust) and React +
+TypeScript. Cut clips together, then export at full quality or under a Discord size limit.
+
+## Requirements
+
+- Windows 10 or 11
+- `ffmpeg` and `ffprobe` 6 or newer on PATH, or next to `relight.exe` (they aren't bundled)
+- An NVIDIA GPU is optional (used for recording)
+
+## Use
+
+```sh
+relight                 # open the window (or bring back the running one)
+relight clip.mp4        # open with a clip on the timeline
+relight trip.relight    # open a project
+```
+
+**Editing.** One track; clips play end to end. Split, trim by dragging an edge, move by
+dragging, copy/cut/paste, undo/redo. Drag videos in from the media bin. Clips show
+thumbnails and a waveform.
+
+**Projects.** Saved as `.relight` files (JSON). They point to the media instead of copying
+it. If files have moved, relight asks where they are.
+
+**Export.** **Full quality** (H.264, visually lossless) or **Discord** (fits under an MB
+limit, 20 by default; H.264 or AV1). Size and frame rate can be lowered, but never raised
+above the first clip's.
+
+## Recording
+
+- **Ctrl + 5** starts and stops recording from anywhere, games included. **Record** in the
+  top bar does the same. Change the hotkey in Settings (the gear, or Ctrl + ,).
+- Captures the screen the mouse is on, game sound (the output device) and the microphone.
+- Encodes on the GPU with NVENC; without an NVIDIA card it falls back to x264.
+- Saves to `Videos\relight` and adds the recording to the timeline. The first audio track
+  is the mix; separate Game and Microphone tracks follow it.
+- Closing the window leaves relight in the tray (a setting), so the hotkey keeps working.
+  **Quit** is in the tray menu.
+- **Hotkey does nothing?** Another program holds it. Windows gives a hotkey to only one
+  program (ZoomIt uses Ctrl + 5, for example).
+
+## Keys
+
+| Key | Does |
+| --- | --- |
+| Space or K | Play / pause |
+| ← / → | Back / forward a frame |
+| Shift + ← / → | Back / forward a second |
+| Home / End | Start / end |
+| S | Split the clip at the playhead |
+| Delete | Delete the selected clips (the rest close up) |
+| Ctrl + C / X / V | Copy / cut / paste (pastes at the playhead) |
+| Ctrl + Z, Ctrl + Shift + Z | Undo, redo |
+| Ctrl + A, Escape | Select all, select none |
+| Ctrl + I | Import videos |
+| Ctrl + N / O / S | New, open, save project (Ctrl + Shift + S saves as) |
+| Ctrl + E | Export |
+| Ctrl + , | Settings |
+| Ctrl + wheel | Zoom the timeline |
+
+## Build from source
+
+Needs Node 20+, stable Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/)
+for Windows (WebView2, MSVC build tools).
+
+```sh
+npm install
+npm run tauri dev        # run with hot reload
+npm run install-cli      # release build of relight.exe into ~/.cargo/bin (on PATH)
+npm test                 # the window's tests
+cargo test --workspace -- --include-ignored   # from the repo root; the ignored tests need ffmpeg
+cargo run --release -p relight-media --example discord_encode -- clip.mp4 [out.mp4] [--mb 20] [--av1] [--film]
+```
+
+The last command runs the Discord preset on its own, without the app. Pushes to `main`
+build Windows installers in GitHub Actions; they're attached to the workflow run as
+artifacts.
+
+## Layout
+
+- `src/`: the React window
+- `src-tauri/`: the app (window, commands, tray, hotkey, settings)
+- `crates/ffmpeg`: running ffmpeg and ffprobe
+- `crates/media`: timeline rendering, export presets (including Discord), thumbnails and waveforms
+- `crates/recorder`: screen and sound capture
+
+## License
+
+MIT. See [LICENSE](LICENSE).
