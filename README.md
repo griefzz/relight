@@ -20,9 +20,10 @@ relight trip.relight    # open a project
 ```
 
 The setup `.exe` puts the `relight` command on your PATH (open a new terminal after
-installing) and takes it off when uninstalling. If you also have a copy from
-`npm run install-cli`, whichever comes first on the PATH wins: `cargo uninstall relight`
-leaves the installed one.
+installing), unless you untick that on its Options page (or pass `/NOPATH` to a silent
+`/S` install); updates keep the choice, and uninstalling takes it off. If you also have a
+copy from `npm run install-cli`, whichever comes first on the PATH wins:
+`cargo uninstall relight` leaves the installed one.
 
 **Editing.** One track; clips play end to end. Split, trim by dragging an edge, move by
 dragging, copy/cut/paste, undo/redo. Drag videos in from the media bin. Clips show
@@ -112,6 +113,9 @@ The ffmpeg the installers ship with is a pinned build from
 
 - `src/`: the React window
 - `src-tauri/`: the app (window, commands, tray, hotkey, settings)
+- `src-tauri/windows/`: the installer's PATH option. `installer.nsi` is Tauri's installer
+  template for the pinned `@tauri-apps/cli` with one line added, so moving to another CLI
+  version means taking its template and adding that line back.
 - `crates/ffmpeg`: finding and running ffmpeg and ffprobe
 - `crates/media`: timeline rendering, export presets (including Discord), thumbnails and waveforms
 - `crates/recorder`: screen and sound capture
