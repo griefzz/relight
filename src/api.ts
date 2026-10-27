@@ -184,5 +184,8 @@ export const quitApp = () => invoke<void>("quit");
 /** Something that went wrong starting up (the hotkey taken), the first time it's asked. */
 export const takeNotice = () => invoke<string | null>("take_notice");
 
+/** Whether this copy updates itself: only released ones do. */
+export const updatesOn = () => invoke<boolean>("updates_on");
+
 /** A URL the player can stream a local file from. */
 export const mediaUrl = (path: string) => convertFileSrc(path);

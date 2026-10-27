@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { totalLength } from "./clips";
+import { setFullscreen, toggleFullscreen, useFullscreen } from "../player/fullscreen";
 import { chooseProject, importMedia, saveProject, startNewProject } from "./files";
 import {
   clearSelection,
@@ -103,12 +104,16 @@ export function useShortcuts(actions: Actions) {
           case "s":
             split();
             break;
+          case "f":
+            toggleFullscreen();
+            break;
           case "Delete":
           case "Backspace":
             deleteSelected();
             break;
           case "Escape":
-            clearSelection();
+            if (useFullscreen.getState().on) setFullscreen(false);
+            else clearSelection();
             break;
           default:
             return;

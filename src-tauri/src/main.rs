@@ -52,6 +52,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             window::initial_file,
             window::take_notice,
+            window::updates_on,
             window::quit,
             media::open_media,
             media::previews,

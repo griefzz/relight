@@ -52,6 +52,7 @@ above the first clip's.
 | Shift + ← / → | Back / forward a second |
 | Home / End | Start / end |
 | S | Split the clip at the playhead |
+| F | Full screen (Esc leaves it) |
 | Delete | Delete the selected clips (the rest close up) |
 | Ctrl + C / X / V | Copy / cut / paste (pastes at the playhead) |
 | Ctrl + Z, Ctrl + Shift + Z | Undo, redo |

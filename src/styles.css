@@ -385,6 +385,26 @@ button.icon.small {
   border-top: 1px solid var(--border);
 }
 
+.viewer.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #000;
+}
+
+.viewer.fullscreen .transport {
+  transition: opacity 0.3s;
+}
+
+.viewer.idle,
+.viewer.idle .screen {
+  cursor: none;
+}
+
+.viewer.idle .transport {
+  opacity: 0;
+}
+
 .timecode {
   font-family: var(--mono);
   font-size: 13px;

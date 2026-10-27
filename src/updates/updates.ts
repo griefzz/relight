@@ -4,6 +4,7 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
+import { updatesOn } from "../api";
 
 const EVERY = 6 * 60 * 60 * 1000;
 
@@ -29,12 +30,19 @@ async function look() {
   }
 }
 
-/** Starts looking for updates (not in development); returns what stops it. */
+/** Starts looking for updates, if this copy updates itself; returns what stops it. */
 export function followUpdates(): () => void {
-  if (import.meta.env.DEV) return () => {};
-  look();
-  const timer = setInterval(look, EVERY);
-  return () => clearInterval(timer);
+  let timer = 0;
+  let stopped = false;
+  updatesOn().then((on) => {
+    if (!on || stopped) return;
+    look();
+    timer = window.setInterval(look, EVERY);
+  });
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 /** Installs the update and starts the new version. On Windows the installer closes relight itself. */

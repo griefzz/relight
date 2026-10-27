@@ -40,6 +40,13 @@ pub fn take_notice(state: State<Notice>) -> Option<String> {
     state.0.lock().unwrap().take()
 }
 
+/// Whether this copy updates itself. Only the release workflow's builds do: another copy
+/// (`npm run install-cli`, a development build) would install a second relight beside itself.
+#[tauri::command]
+pub fn updates_on() -> bool {
+    option_env!("RELIGHT_UPDATES").is_some()
+}
+
 /// Brings the window back from the tray, the taskbar or behind other windows.
 pub fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {

@@ -20,3 +20,15 @@ export const PauseIcon = () => (
     <path d="M3 1.5h3v11H3zM8 1.5h3v11H8z" fill="currentColor" />
   </svg>
 );
+
+export const FullscreenIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+    <path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+  </svg>
+);
+
+export const ExitFullscreenIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+    <path d="M5 1v4H1M13 5H9V1M9 13V9h4M1 9h4v4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+  </svg>
+);

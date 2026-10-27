@@ -39,6 +39,8 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The copies this builds look for updates; others don't.
+          RELIGHT_UPDATES: "1"
         run: npx tauri build --config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.release.conf.json
 
       - name: Publish the release
