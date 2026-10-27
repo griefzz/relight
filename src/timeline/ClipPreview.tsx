@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { type Clip, clamp, clipLength } from "../editor/clips";
 import { type Preview, usePreviews } from "./previews";
 
@@ -13,6 +13,7 @@ const WAVE_HEIGHT = 24;
 export function ClipPreview(props: { clip: Clip; left: number; zoom: number; view: { left: number; width: number } }) {
   const { clip, left, zoom, view } = props;
   const preview = usePreviews((s) => s[clip.path]);
+  const peaks = useMemo(() => preview && soundOf(preview, clip.levels), [preview, clip.levels]);
   const from = Math.max(0, view.left - left);
   const to = Math.min(clipLength(clip) * zoom, view.left + view.width - left);
   if (!preview || to <= from) return null;
@@ -20,9 +21,27 @@ export function ClipPreview(props: { clip: Clip; left: number; zoom: number; vie
   return (
     <>
       {preview.stripUrl && <Filmstrip preview={preview} {...span} />}
-      {preview.peaks && <Waveform peaks={preview.peaks} perSecond={preview.peaksPerSecond} {...span} />}
+      {peaks && <Waveform peaks={peaks} perSecond={preview.peaksPerSecond} {...span} />}
     </>
   );
+}
+
+/**
+ * The peaks to draw: the clip's own sound, or with its sources set to `levels`, them added
+ * up at those levels. (The sum of peaks is a little over the peak of the sum, which is fine
+ * for seeing which is louder.)
+ */
+function soundOf(preview: Preview, levels: number[] | undefined): Uint8Array | null {
+  const sources = preview.sourcePeaks;
+  if (!levels || sources.length !== levels.length) return preview.peaks;
+  const length = Math.max(...sources.map((peaks) => peaks.length));
+  const mixed = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    let sum = 0;
+    for (let n = 0; n < sources.length; n++) sum += (sources[n][i] ?? 0) * levels[n];
+    mixed[i] = Math.min(255, sum);
+  }
+  return mixed;
 }
 
 interface Span {

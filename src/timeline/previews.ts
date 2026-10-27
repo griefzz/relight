@@ -7,6 +7,8 @@ import { getPreviewPeaks, getPreviews, mediaUrl, type Previews } from "../api";
 export interface Preview extends Previews {
   stripUrl: string | null;
   peaks: Uint8Array | null;
+  /** For a recording, the peaks of each of its sound sources. */
+  sourcePeaks: Uint8Array[];
 }
 
 export const usePreviews = create<Record<string, Preview>>(() => ({}));
@@ -31,8 +33,9 @@ async function work() {
     try {
       const previews = await getPreviews(path);
       const peaks = previews.sound ? await getPreviewPeaks(path) : null;
+      const sourcePeaks = await Promise.all(previews.sources.map((_, n) => getPreviewPeaks(path, n)));
       const stripUrl = previews.strip ? mediaUrl(previews.strip) : null;
-      usePreviews.setState({ [path]: { ...previews, stripUrl, peaks } });
+      usePreviews.setState({ [path]: { ...previews, stripUrl, peaks, sourcePeaks } });
     } catch (e) {
       // The clip just shows its colour, as before.
       console.warn(`No previews for ${path}:`, e);

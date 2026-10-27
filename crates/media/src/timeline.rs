@@ -46,18 +46,38 @@ pub struct Segment {
     pub path: String,
     pub start: f64,
     pub end: f64,
+    /// For a recording, how loud each of its sound sources is (1 as recorded), in place of
+    /// the mix it was saved with. None for the clip's sound as it is.
+    #[serde(default)]
+    pub levels: Option<Vec<f64>>,
 }
 
+/// The loudest a source can be turned up to.
+const MOST_LEVEL: f64 = 4.0;
+
 impl Segment {
+    /// `start` to `end` seconds of the clip at `path`, its sound as it is.
+    pub fn new(path: impl Into<String>, start: f64, end: f64) -> Self {
+        Self { path: path.into(), start, end, levels: None }
+    }
+
     pub fn length(&self) -> f64 {
         self.end - self.start
     }
 
+    /// Whether its sound is other than as recorded.
+    pub fn rebalanced(&self) -> bool {
+        self.levels.as_ref().is_some_and(|levels| levels.iter().any(|&level| level != 1.0))
+    }
+
     fn check(&self) -> Result<(), String> {
-        if self.start.is_finite() && self.end.is_finite() && 0.0 <= self.start && self.start < self.end {
-            return Ok(());
+        if !(self.start.is_finite() && self.end.is_finite() && 0.0 <= self.start && self.start < self.end) {
+            return Err(format!("A piece of {} runs from {}s to {}s, which isn't a length.", self.path, self.start, self.end));
         }
-        Err(format!("A piece of {} runs from {}s to {}s, which isn't a length.", self.path, self.start, self.end))
+        if self.levels.iter().flatten().any(|level| !(0.0..=MOST_LEVEL).contains(level)) {
+            return Err(format!("A piece of {} has its sound turned to {:?}.", self.path, self.levels));
+        }
+        Ok(())
     }
 }
 
@@ -104,12 +124,21 @@ const DECODER_THREADS: &str = "2";
 /// How much of the progress rendering the parts is; joining them is the rest.
 const RENDERING: f64 = 0.97;
 
-/// A piece as it's rendered: whether its clip has sound, and how long it lasts in whole
+/// A piece as it's rendered: where its sound comes from, and how long it lasts in whole
 /// frames, so picture and sound end together at every join.
 struct Piece<'a> {
     segment: &'a Segment,
-    sound: bool,
+    sound: Sound<'a>,
     length: f64,
+}
+
+enum Sound<'a> {
+    /// The clip has none: silence.
+    Silent,
+    /// Its first track, as it is.
+    AsIs,
+    /// A recording's sources, each at its level, mixed.
+    Sources(&'a [f64]),
 }
 
 /// Renders `segments` end to end into `output`, encoded as `encoding` says. The picture
@@ -148,10 +177,18 @@ fn render_in_runs(
     let fps = frame.2;
     let pieces: Vec<Piece> = segments
         .iter()
-        .map(|segment| Piece {
-            segment,
-            sound: sources[segment.path.as_str()].audio.is_some(),
-            length: (segment.length() * fps).round().max(1.0) / fps,
+        .map(|segment| {
+            let info = &sources[segment.path.as_str()];
+            // Levels only mean something for the recording they were set on.
+            let levels = segment.levels.as_deref().filter(|levels| {
+                segment.rebalanced() && info.sources().is_some_and(|sources| sources.len() == levels.len())
+            });
+            let sound = match levels {
+                Some(levels) => Sound::Sources(levels),
+                None if info.audio.is_some() => Sound::AsIs,
+                None => Sound::Silent,
+            };
+            Piece { segment, sound, length: (segment.length() * fps).round().max(1.0) / fps }
         })
         .collect();
     let total: f64 = pieces.iter().map(|piece| piece.length).sum();
@@ -216,14 +253,26 @@ fn pieces_args(pieces: &[Piece], (w, h, fps): (u32, u32, f64)) -> Vec<OsString> 
         );
         // Every piece gets exactly its length of 48 kHz stereo, silent if the clip has
         // no sound, so the sound can't drift from the picture across cuts.
-        if piece.sound {
-            let _ = write!(
-                graph,
-                "[{i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,\
-                 apad=whole_dur={length:.6},atrim=duration={length:.6},asetpts=PTS-STARTPTS[a{i}];"
-            );
-        } else {
-            let _ = write!(graph, "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={length:.6}[a{i}];");
+        let fit = format!(
+            "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,\
+             apad=whole_dur={length:.6},atrim=duration={length:.6},asetpts=PTS-STARTPTS[a{i}];"
+        );
+        match piece.sound {
+            Sound::Silent => {
+                let _ = write!(graph, "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={length:.6}[a{i}];");
+            }
+            Sound::AsIs => {
+                let _ = write!(graph, "[{i}:a:0]{fit}");
+            }
+            Sound::Sources(levels) => {
+                // Track 0 is the recording's own mix; its sources follow it.
+                let mut each = String::new();
+                for (n, level) in levels.iter().enumerate() {
+                    let _ = write!(graph, "[{i}:a:{}]volume={level:.4}[a{i}s{n}];", n + 1);
+                    let _ = write!(each, "[a{i}s{n}]");
+                }
+                let _ = write!(graph, "{each}amix=inputs={}:duration=longest:normalize=0,{fit}", levels.len());
+            }
         }
         let _ = write!(joined, "[v{i}][a{i}]");
     }
@@ -241,7 +290,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::testing::{decodes_cleanly, frames, make, stream_length};
+    use crate::testing::{decodes_cleanly, frames, loudest, make, recording, stream_length};
 
     /// Clips to cut: 4s of 720p30 with sound, and 3s of 480p60 without.
     fn clips(dir: &Path) -> (String, String) {
@@ -258,9 +307,9 @@ mod tests {
 
     fn timeline(a: &str, b: &str) -> [Segment; 3] {
         [
-            Segment { path: a.into(), start: 1.0, end: 2.5 },
-            Segment { path: b.into(), start: 0.0, end: 3.0 },
-            Segment { path: a.into(), start: 3.0, end: 4.0 },
+            Segment::new(a, 1.0, 2.5),
+            Segment::new(b, 0.0, 3.0),
+            Segment::new(a, 3.0, 4.0),
         ]
     }
 
@@ -311,8 +360,8 @@ mod tests {
         ]);
         let short = short.to_string_lossy().into_owned();
         let segments = [
-            Segment { path: short.clone(), start: 0.0, end: 3.0 },
-            Segment { path: short, start: 0.0, end: 1.0 },
+            Segment::new(short.clone(), 0.0, 3.0),
+            Segment::new(short, 0.0, 1.0),
         ];
         let out = dir.join("out.mov");
         // Each piece its own part, so the held frames have to carry across a join.
@@ -322,12 +371,41 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "runs ffmpeg"]
+    fn a_recording_renders_with_its_sources_at_their_levels() {
+        let scratch = Scratch::new().unwrap();
+        let dir = scratch.path();
+        let recording = recording(dir);
+        let info = ffmpeg::probe(&recording).unwrap();
+        assert_eq!(info.sources(), Some(&["Game".to_string(), "Microphone".to_string()][..]));
+
+        let loudness = |levels: Option<Vec<f64>>| {
+            let out = dir.join("out.mov");
+            let piece = Segment { levels, ..Segment::new(recording.to_string_lossy(), 0.0, 2.0) };
+            render(&Job::silent(), &[piece], &Picture::default(), &out, &intermediate()).unwrap();
+            loudest(&out)
+        };
+        let as_recorded = loudness(None);
+        assert!(as_recorded > -40.0, "the mix peaks at {as_recorded} dB");
+        assert!((loudness(Some(vec![1.0, 1.0])) - as_recorded).abs() < 0.2, "both at 100% is the mix");
+        assert!((loudness(Some(vec![0.5, 1.0])) - (as_recorded - 6.0)).abs() < 0.5, "half the game is 6 dB down");
+        assert!(loudness(Some(vec![0.0, 2.0])) < -60.0, "no game leaves the silent microphone");
+        // Levels for a file without those sources are let be.
+        let (a, _) = clips(dir);
+        let out = dir.join("plain.mov");
+        let piece = Segment { levels: Some(vec![0.0, 0.0]), ..Segment::new(a, 0.0, 1.0) };
+        render(&Job::silent(), &[piece], &Picture::default(), &out, &intermediate()).unwrap();
+        assert!(loudest(&out) > -30.0, "a clip that isn't a recording keeps its sound");
+    }
+
+    #[test]
     fn pieces_that_are_not_a_length_are_refused() {
-        let piece = |start, end| Segment { path: "clip.mp4".into(), start, end };
+        let piece = |start, end| Segment::new("clip.mp4", start, end);
         assert!(piece(0.0, 1.0).check().is_ok());
         assert!(piece(1.0, 1.0).check().is_err());
         assert!(piece(-1.0, 1.0).check().is_err());
         assert!(piece(0.0, f64::INFINITY).check().is_err());
+        assert!(Segment { levels: Some(vec![5.0]), ..piece(0.0, 1.0) }.check().is_err());
         let refused = render(&Job::silent(), &[piece(2.0, 1.0)], &Picture::default(), Path::new("out.mp4"), &full_quality());
         assert!(refused.unwrap_err().contains("isn't a length"));
     }

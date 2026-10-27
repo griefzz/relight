@@ -38,6 +38,9 @@ above the first clip's.
 - Encodes on the GPU with NVENC; without an NVIDIA card it falls back to x264.
 - Saves to `Videos\relight` and adds the recording to the timeline. The first audio track
   is the mix; separate Game and Microphone tracks follow it.
+- **Balancing them:** select a recording's clips and the timeline's toolbar shows a Game and
+  a Mic slider (0 to 200%; double-click one to put it back). The player and the export both
+  use them.
 - Closing the window leaves relight in the tray (a setting), so the hotkey keeps working.
   **Quit** is in the tray menu.
 - **Hotkey does nothing?** Another program holds it. Windows gives a hotkey to only one

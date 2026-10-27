@@ -43,17 +43,18 @@ pub async fn previews(app: AppHandle, path: String) -> Result<Previews, String> 
     let previews = tauri::async_runtime::spawn_blocking(move || previews::make(&dir, Path::new(&path)))
         .await
         .map_err(|e| e.to_string())??;
-    if let Some(strip) = &previews.strip {
-        app.asset_protocol_scope().allow_file(strip).map_err(|e| e.to_string())?;
+    for file in previews.strip.iter().chain(&previews.sources) {
+        app.asset_protocol_scope().allow_file(file).map_err(|e| e.to_string())?;
     }
     Ok(previews)
 }
 
-/// The peaks `previews` made for the clip at `path`: one byte each, 0 to 255.
+/// The peaks `previews` made for the clip at `path`, of its sound or of one of its sources:
+/// one byte each, 0 to 255.
 #[tauri::command]
-pub async fn preview_peaks(app: AppHandle, path: String) -> Result<Response, String> {
+pub async fn preview_peaks(app: AppHandle, path: String, source: Option<usize>) -> Result<Response, String> {
     let dir = cache_dir(&app)?;
-    let peaks = tauri::async_runtime::spawn_blocking(move || previews::peaks(&dir, Path::new(&path)))
+    let peaks = tauri::async_runtime::spawn_blocking(move || previews::peaks(&dir, Path::new(&path), source))
         .await
         .map_err(|e| e.to_string())??;
     Ok(Response::new(peaks))

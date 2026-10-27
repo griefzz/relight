@@ -13,8 +13,10 @@ import {
   moveTo,
   newId,
   sameClips,
+  sourcesOf,
   totalLength,
   trimTo,
+  withLevel,
 } from "./clips";
 
 const HISTORY = 200;
@@ -150,6 +152,21 @@ export function trimClip(id: string, edge: Edge, time: number) {
   const { clips, media } = get();
   const clip = clips.find((c) => c.id === id);
   if (clip) set({ clips: trimTo(clips, id, edge, time, media[clip.path]) });
+}
+
+/**
+ * Sets how loud source `n` is in the selected clips that are recordings; during a drag
+ * (`beginDrag` to `endDrag`), as one undo step.
+ */
+export function changeLevel(n: number, level: number) {
+  const { clips, selection, media, dragStart } = get();
+  const next = clips.map((clip) => {
+    const sources = selection.includes(clip.id) ? sourcesOf(media[clip.path]) : null;
+    return sources && n < sources.length ? withLevel(clip, sources, n, level) : clip;
+  });
+  if (sameClips(next, clips)) return;
+  if (dragStart) set({ clips: next });
+  else commit(next);
 }
 
 export function endDrag() {

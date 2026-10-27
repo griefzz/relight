@@ -66,9 +66,11 @@ fn for_discord(
     output: &Path,
     opts: &discord::Options,
 ) -> Result<(), String> {
-    // A whole clip, picture unchanged, goes to the encoder as it is, which copies it
-    // when it already fits.
-    if let [only] = segments {
+    // A whole clip, picture and sound unchanged, goes to the encoder as it is, which
+    // copies it when it already fits.
+    if let [only] = segments
+        && !only.rebalanced()
+    {
         let source = Path::new(&only.path);
         let info = ffmpeg::probe(source)?;
         let whole = only.start <= 0.001 && only.end >= info.duration - 0.001;

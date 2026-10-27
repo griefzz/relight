@@ -15,7 +15,7 @@ use relight_ffmpeg::{self as ffmpeg, Job, Scratch, args, ffmpeg_path};
 use serde::{Deserialize, Serialize};
 
 /// Goes up when what's made changes, so older caches are made again.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const TILE_HEIGHT: u32 = 64;
 const MOST_TILES: u32 = 200;
 /// Thumbnails no closer together than this, in seconds.
@@ -43,11 +43,19 @@ pub struct Previews {
     /// Whether there are peaks to read with `peaks`.
     pub sound: bool,
     pub peaks_per_second: u32,
+    /// For a recording, each sound source ("Game", "Microphone") on its own, as a file the
+    /// player can play alongside the picture; its peaks are read with `peaks` too.
+    pub sources: Vec<String>,
 }
 
-/// The peaks `make` made for the clip at `source`: one byte each, 0 to 255.
-pub fn peaks(cache: &Path, source: &Path) -> Result<Vec<u8>, String> {
-    let file = cache.join(format!("{}.peaks", cache_key(source)?));
+/// The peaks `make` made for the clip at `source`, of its sound or of one of its sources:
+/// one byte each, 0 to 255.
+pub fn peaks(cache: &Path, source: &Path, of: Option<usize>) -> Result<Vec<u8>, String> {
+    let key = cache_key(source)?;
+    let file = match of {
+        None => cache.join(format!("{key}.peaks")),
+        Some(n) => cache.join(format!("{key}.source{n}.peaks")),
+    };
     fs::read(file).map_err(|e| format!("No waveform made for {}: {e}", source.display()))
 }
 
@@ -65,7 +73,7 @@ pub fn make(dir: &Path, source: &Path) -> Result<Previews, String> {
     let key = cache_key(source)?;
     let index = dir.join(format!("{key}.json"));
     let peaks = dir.join(format!("{key}.peaks"));
-    if let Some(cached) = cached(&index, &peaks) {
+    if let Some(cached) = cached(dir, &key) {
         return Ok(cached);
     }
 
@@ -78,6 +86,7 @@ pub fn make(dir: &Path, source: &Path) -> Result<Previews, String> {
         step: 0.0,
         sound: false,
         peaks_per_second: PEAKS_PER_SECOND,
+        sources: Vec::new(),
     };
     if let Some(video) = &info.video {
         let tiles = ((info.duration / CLOSEST_TILES).ceil() as u32).clamp(1, MOST_TILES);
@@ -92,8 +101,20 @@ pub fn make(dir: &Path, source: &Path) -> Result<Previews, String> {
         }
     }
     if info.audio.is_some() {
-        fs::write(&peaks, read_peaks(source)?).map_err(|e| e.to_string())?;
+        fs::write(&peaks, read_peaks(source, 0)?).map_err(|e| e.to_string())?;
         previews.sound = true;
+    }
+    // A recording's sources, after its mix: each copied out on its own (no encoding, so
+    // it's quick) for the player to balance, with its peaks.
+    for n in 0..info.sources().map_or(0, <[String]>::len) {
+        let track = n + 1;
+        let sound = dir.join(format!("{key}.source{n}.m4a"));
+        ffmpeg::run(&Job::silent(), "copying out a sound track", 0.0, args![
+            "-i", source, "-map", format!("0:a:{track}"), "-vn", "-c", "copy", "-f", "mp4", &sound,
+        ])?;
+        let peaks = dir.join(format!("{key}.source{n}.peaks"));
+        fs::write(&peaks, read_peaks(source, track)?).map_err(|e| e.to_string())?;
+        previews.sources.push(sound.to_string_lossy().into_owned());
     }
     // Written last: its being there means the rest is.
     let json = serde_json::to_string(&previews).map_err(|e| e.to_string())?;
@@ -157,23 +178,28 @@ fn make_strip(source: &Path, tiles: u32, step: f64, tile_width: u32, strip: &Pat
 }
 
 /// The previews already made, if they're all there. Marks them used, for `prune`.
-fn cached(index: &Path, peaks: &Path) -> Option<Previews> {
-    let previews: Previews = serde_json::from_str(&fs::read_to_string(index).ok()?).ok()?;
+fn cached(dir: &Path, key: &str) -> Option<Previews> {
+    let index = dir.join(format!("{key}.json"));
+    let previews: Previews = serde_json::from_str(&fs::read_to_string(&index).ok()?).ok()?;
     let strip_there = previews.strip.as_ref().is_none_or(|strip| Path::new(strip).exists());
-    if !strip_there || (previews.sound && !peaks.exists()) {
+    let peaks_there = !previews.sound || dir.join(format!("{key}.peaks")).exists();
+    let sources_there = previews.sources.iter().enumerate().all(|(n, sound)| {
+        Path::new(sound).exists() && dir.join(format!("{key}.source{n}.peaks")).exists()
+    });
+    if !(strip_there && peaks_there && sources_there) {
         return None;
     }
-    let _ = fs::File::options().write(true).open(index).and_then(|f| f.set_modified(SystemTime::now()));
+    let _ = fs::File::options().write(true).open(&index).and_then(|f| f.set_modified(SystemTime::now()));
     Some(previews)
 }
 
-/// The loudest sample in each `1 / PEAKS_PER_SECOND` of the first sound track, 0 to 255.
-fn read_peaks(source: &Path) -> Result<Vec<u8>, String> {
+/// The loudest sample in each `1 / PEAKS_PER_SECOND` of sound track `track`, 0 to 255.
+fn read_peaks(source: &Path, track: usize) -> Result<Vec<u8>, String> {
     let mut command = Command::new(ffmpeg_path());
     command
         .args(["-v", "error", "-i"])
         .arg(source)
-        .args(["-map", "0:a:0", "-ac", "1", "-ar", &PEAK_SAMPLE_RATE.to_string(), "-f", "s16le", "-"])
+        .args(["-map", &format!("0:a:{track}"), "-ac", "1", "-ar", &PEAK_SAMPLE_RATE.to_string(), "-f", "s16le", "-"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -232,18 +258,18 @@ pub fn prune(dir: &Path) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let index = path.with_extension("json");
-        let stale = if path == index {
-            older_than(&path, KEEP_FOR)
+        let name = entry.file_name();
+        let Some(key) = name.to_str().and_then(|name| name.split('.').next()) else { continue };
+        // A file's previews ("key.jpg", "key.source0.peaks") go with its index ("key.json");
+        // without one, they're from a run that didn't finish.
+        let index = dir.join(format!("{key}.json"));
+        let stale = if index.exists() {
+            older_than(&index, KEEP_FOR)
         } else {
-            !index.exists() && older_than(&path, Duration::from_secs(60 * 60))
+            older_than(&path, Duration::from_secs(60 * 60))
         };
         if stale {
             let _ = fs::remove_file(&path);
-            if path == index {
-                let _ = fs::remove_file(path.with_extension("jpg"));
-                let _ = fs::remove_file(path.with_extension("peaks"));
-            }
         }
     }
 }
@@ -251,6 +277,32 @@ pub fn prune(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::recording;
+
+    #[test]
+    #[ignore = "runs ffmpeg"]
+    fn a_recording_gets_its_sources_on_their_own() {
+        let scratch = Scratch::new().unwrap();
+        let dir = scratch.path();
+        let clip = recording(dir);
+        let cache = dir.join("cache");
+        let previews = make(&cache, &clip).unwrap();
+
+        assert_eq!(previews.sources.len(), 2);
+        for sound in &previews.sources {
+            let info = ffmpeg::probe(Path::new(sound)).unwrap();
+            assert!(info.video.is_none() && info.audio.is_some(), "{sound} is just its sound");
+        }
+        let loudest = |of| peaks(&cache, &clip, of).unwrap().into_iter().max().unwrap();
+        assert!(loudest(Some(0)) > 10, "the game's tone shows");
+        assert_eq!(loudest(Some(1)), 0, "the microphone was silent");
+        assert_eq!(make(&cache, &clip).unwrap().sources, previews.sources, "and they're kept");
+
+        // Pruning keeps what's in use, whatever it's called.
+        prune(&cache);
+        assert!(previews.sources.iter().all(|sound| Path::new(sound).exists()));
+        assert!(peaks(&cache, &clip, Some(1)).is_ok());
+    }
 
     #[test]
     #[ignore = "runs ffmpeg"]
@@ -272,11 +324,12 @@ mod tests {
         let cache = dir.join("cache");
         let previews = make(&cache, &clip).unwrap();
         assert_eq!((previews.tiles, previews.tile_width, previews.tile_height), (16, 112, 64));
+        assert!(previews.sources.is_empty(), "a clip that isn't a recording has no sources");
         let strip = ffmpeg::probe(Path::new(previews.strip.as_ref().unwrap())).unwrap();
         let strip = strip.video.unwrap();
         assert_eq!((strip.width, strip.height), (16 * 112, 64));
 
-        let peaks = fs::read(cache.join(format!("{}.peaks", cache_key(&clip).unwrap()))).unwrap();
+        let peaks = peaks(&cache, &clip, None).unwrap();
         assert!((peaks.len() as i64 - 200).abs() <= 3, "{} peaks", peaks.len());
         assert!(peaks[10..90].iter().all(|&p| p < 5), "silence reads quiet");
         assert!(peaks[110..190].iter().all(|&p| p > 200), "the tone reads loud");

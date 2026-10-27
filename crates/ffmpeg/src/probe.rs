@@ -16,6 +16,16 @@ pub struct MediaInfo {
     pub size: u64,
     pub video: Option<VideoInfo>,
     pub audio: Option<AudioInfo>,
+    /// Every sound track's title, in order ("" for one without).
+    pub tracks: Vec<String>,
+}
+
+impl MediaInfo {
+    /// The sound sources of a relight recording ("Game", "Microphone"): the tracks after
+    /// its first, which mixes them. None for a file made any other way.
+    pub fn sources(&self) -> Option<&[String]> {
+        (self.tracks.len() >= 3 && self.tracks[0] == "Mix").then(|| &self.tracks[1..])
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +70,14 @@ struct ProbedStream {
     avg_frame_rate: Option<String>,
     side_data_list: Option<Vec<ProbedSideData>>,
     disposition: Option<ProbedDisposition>,
+    tags: Option<ProbedTags>,
+}
+
+/// A track's title, which MP4 keeps as "name" and other containers as "title".
+#[derive(Deserialize)]
+struct ProbedTags {
+    title: Option<String>,
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -105,7 +123,7 @@ pub fn probe(path: &Path) -> Result<MediaInfo, String> {
         .arg(concat!(
             "format=duration",
             ":stream=codec_type,codec_name,profile,pix_fmt,width,height,bit_rate,avg_frame_rate",
-            ":stream_side_data=rotation:stream_disposition=attached_pic"
+            ":stream_side_data=rotation:stream_disposition=attached_pic:stream_tags=title,name"
         ))
         .args(["-of", "json"])
         .arg(path);
@@ -144,9 +162,15 @@ pub fn probe(path: &Path) -> Result<MediaInfo, String> {
         codec: s.codec_name.clone().unwrap_or_default(),
         bit_rate: s.bit_rate.as_deref().and_then(|b| b.parse().ok()),
     });
+    let tracks = probed
+        .streams
+        .iter()
+        .filter(|s| s.codec_type == "audio")
+        .map(|s| s.tags.as_ref().and_then(|t| t.title.clone().or_else(|| t.name.clone())).unwrap_or_default())
+        .collect();
     let size = fs::metadata(path).map_err(|e| format!("Couldn't read {}: {e}", path.display()))?.len();
 
-    Ok(MediaInfo { path: path.to_string_lossy().into_owned(), duration, size, video, audio })
+    Ok(MediaInfo { path: path.to_string_lossy().into_owned(), duration, size, video, audio, tracks })
 }
 
 /// A frame rate as ffprobe writes it ("30000/1001"); 30 when it doesn't say.

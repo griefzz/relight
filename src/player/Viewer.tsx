@@ -6,6 +6,7 @@ import { fileName, formatLength, formatTime } from "../ui/format";
 import { ExitFullscreenIcon, FullscreenIcon, PauseIcon, PlayIcon } from "../ui/icons";
 import { playerTime, setPlaying, togglePlay, useEditor } from "../editor/store";
 import { totalLength } from "../editor/clips";
+import { usePreviews } from "../timeline/previews";
 
 export function Viewer({ onError }: { onError: (error: unknown) => void }) {
   const a = useRef<HTMLVideoElement>(null);
@@ -19,17 +20,25 @@ export function Viewer({ onError }: { onError: (error: unknown) => void }) {
   const idle = useIdle(fullscreen && playing);
 
   useEffect(() => {
-    const player = new Engine([a.current!, b.current!], {
+    const events = {
       time: playerTime,
       ended: () => setPlaying(false),
-      unplayable: (path) => {
+      unplayable: (path: string | null) => {
         setUnplayable(path);
         // It would sit there "playing" a clip that can't move; stop, so it's clear.
         if (path) setPlaying(false);
       },
-    });
+    };
+    const sourcesOf = (path: string) => usePreviews.getState()[path]?.sources ?? null;
+    const player = new Engine([a.current!, b.current!], events, sourcesOf);
     engine.current = player;
-    return () => player.destroy();
+    // A recording's sources are copied out in the background: once they are, a clip
+    // turned up or down can play them.
+    const stop = usePreviews.subscribe(() => player.refresh());
+    return () => {
+      stop();
+      player.destroy();
+    };
   }, []);
 
   // In this order: the clips, then where to be in them, then whether to play.

@@ -10,6 +10,8 @@ export interface Clip {
   /** Where it starts and ends in that file, in seconds. */
   start: number;
   end: number;
+  /** For a recording, how loud each of its sound sources is (1 as recorded); none for as recorded. */
+  levels?: number[];
 }
 
 export type Edge = "start" | "end";
@@ -17,6 +19,22 @@ export type Edge = "start" | "end";
 export const newId = () => crypto.randomUUID();
 
 export const clipLength = (clip: Clip) => clip.end - clip.start;
+
+/** The sound sources of a relight recording ("Game", "Microphone"), the tracks after its mix; null for any other file. */
+export function sourcesOf(info: MediaInfo | undefined): string[] | null {
+  const tracks = info?.tracks ?? [];
+  return tracks.length >= 3 && tracks[0] === "Mix" ? tracks.slice(1) : null;
+}
+
+/** The most a source can be turned up: twice as loud as recorded. */
+export const MOST_LEVEL = 2;
+
+/** `clip` with source `n` at `level`, given its file's `sources`. Levels back at 1 all round are dropped. */
+export function withLevel(clip: Clip, sources: string[], n: number, level: number): Clip {
+  const levels = (clip.levels ?? sources.map(() => 1)).map((old, i) => (i === n ? clamp(level, 0, MOST_LEVEL) : old));
+  const { levels: _, ...rest } = clip;
+  return levels.every((l) => l === 1) ? rest : { ...rest, levels };
+}
 
 export const totalLength = (clips: Clip[]) => clips.reduce((sum, clip) => sum + clipLength(clip), 0);
 
@@ -99,8 +117,12 @@ export function trimTo(clips: Clip[], id: string, edge: Edge, time: number, medi
 }
 
 export function sameClips(a: Clip[], b: Clip[]): boolean {
+  const sameLevels = (x?: number[], y?: number[]) => (x ?? []).join() === (y ?? []).join();
   return (
     a.length === b.length &&
-    a.every((clip, i) => clip.id === b[i].id && clip.start === b[i].start && clip.end === b[i].end)
+    a.every(
+      (clip, i) =>
+        clip.id === b[i].id && clip.start === b[i].start && clip.end === b[i].end && sameLevels(clip.levels, b[i].levels),
+    )
   );
 }

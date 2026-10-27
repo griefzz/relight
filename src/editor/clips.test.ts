@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { MediaInfo } from "../api";
-import { type Clip, clipStarts, cutAt, frameStart, locate, moveTo, totalLength, trimTo } from "./clips";
+import {
+  type Clip,
+  clipStarts,
+  cutAt,
+  frameStart,
+  locate,
+  moveTo,
+  sameClips,
+  sourcesOf,
+  totalLength,
+  trimTo,
+  withLevel,
+} from "./clips";
 
 const clip = (id: string, start: number, end: number, path = "a.mp4"): Clip => ({ id, path, start, end });
 const at30 = () => 30;
@@ -11,6 +23,7 @@ const media = (duration: number, fps = 30): MediaInfo => ({
   size: 0,
   video: { codec: "h264", profile: null, pixFmt: null, width: 1920, height: 1080, fps },
   audio: null,
+  tracks: [],
 });
 
 describe("locate", () => {
@@ -111,4 +124,29 @@ it("frameStart stays on the frame despite float error", () => {
   expect(frameStart(1, 30)).toBe(1);
   expect(frameStart(0.1 * 3, 10)).toBeCloseTo(0.3, 9);
   expect(clipStarts([clip("a", 0, 2), clip("b", 1, 2)])).toEqual([0, 2]);
+});
+
+describe("levels", () => {
+  const recording = { ...media(10), tracks: ["Mix", "Game", "Microphone"] };
+
+  it("are for recordings, which have a mix then their sources", () => {
+    expect(sourcesOf(recording)).toEqual(["Game", "Microphone"]);
+    expect(sourcesOf({ ...media(10), tracks: ["", ""] })).toBeNull();
+    expect(sourcesOf({ ...media(10), tracks: ["Mix"] })).toBeNull();
+    expect(sourcesOf(undefined)).toBeNull();
+  });
+
+  it("set one source at a time, within bounds, and go when all are back to as recorded", () => {
+    const sources = ["Game", "Microphone"];
+    const quieter = withLevel(clip("a", 0, 1), sources, 0, 0.5);
+    expect(quieter.levels).toEqual([0.5, 1]);
+    expect(withLevel(quieter, sources, 1, 9).levels).toEqual([0.5, 2]);
+    expect(withLevel(quieter, sources, 0, 1)).not.toHaveProperty("levels");
+  });
+
+  it("count as a change", () => {
+    const plain = [clip("a", 0, 1)];
+    expect(sameClips(plain, [withLevel(plain[0], ["Game", "Microphone"], 1, 1.5)])).toBe(false);
+    expect(sameClips(plain, [{ ...plain[0] }])).toBe(true);
+  });
 });

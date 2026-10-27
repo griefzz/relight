@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { fileName, formatLength, formatRuler, formatTime } from "../ui/format";
 import { colorFor } from "../ui/palette";
 import { follow, setDropTarget } from "./pointer";
+import { Balance } from "./Balance";
 import { ClipPreview } from "./ClipPreview";
 import {
   beginDrag,
@@ -202,6 +203,7 @@ export function Timeline() {
         <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
           Redo
         </button>
+        <Balance />
         <div className="spacer" />
         <input
           className="zoom"

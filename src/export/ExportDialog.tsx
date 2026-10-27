@@ -116,7 +116,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       }),
     );
     try {
-      const segments = clips.map(({ path, start, end }) => ({ path, start, end }));
+      const segments = clips.map(({ path, start, end, levels }) => ({ path, start, end, levels }));
       setPhase({ name: "done", result: await exportTimeline(segments, picture, output, preset), preset });
     } catch (e) {
       setPhase(String(e) === CANCELLED ? { name: "options" } : { name: "failed", error: String(e) });

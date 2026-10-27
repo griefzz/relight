@@ -23,6 +23,8 @@ export interface MediaInfo {
   size: number;
   video: VideoInfo | null;
   audio: AudioInfo | null;
+  /** Every sound track's title, in order ("" for one without). */
+  tracks: string[];
 }
 
 export type Tune = "animation" | "film";
@@ -55,6 +57,8 @@ export interface Segment {
   path: string;
   start: number;
   end: number;
+  /** For a recording, how loud each sound source is (1 as recorded). */
+  levels?: number[];
 }
 
 /** The exported picture, where it differs from the first clip's (never above it). */
@@ -77,14 +81,16 @@ export interface Previews {
   /** Whether `previewPeaks` has anything to give. */
   sound: boolean;
   peaksPerSecond: number;
+  /** For a recording, each sound source on its own: files to play beside the picture. */
+  sources: string[];
 }
 
 /** The clip's previews, made first if they aren't cached. */
 export const getPreviews = (path: string) => invoke<Previews>("previews", { path });
 
-/** How loud the clip's sound is: a byte, 0 to 255, every 1 / `peaksPerSecond` seconds. */
-export const getPreviewPeaks = async (path: string) =>
-  new Uint8Array(await invoke<ArrayBuffer>("preview_peaks", { path }));
+/** How loud the clip's sound (or one of its sources) is: a byte, 0 to 255, every 1 / `peaksPerSecond` seconds. */
+export const getPreviewPeaks = async (path: string, source?: number) =>
+  new Uint8Array(await invoke<ArrayBuffer>("preview_peaks", { path, source }));
 
 export const saveProjectFile = (path: string, contents: string) =>
   invoke<void>("save_project", { path, contents });

@@ -38,11 +38,7 @@ fn main() {
         Report::Note { text } => println!("{text}"),
         Report::Progress { .. } => {}
     });
-    let whole = ffmpeg::probe(input).map(|info| Segment {
-        path: input.to_string_lossy().into_owned(),
-        start: 0.0,
-        end: info.duration,
-    });
+    let whole = ffmpeg::probe(input).map(|info| Segment::new(input.to_string_lossy(), 0.0, info.duration));
     let preset = Preset::Discord(opts);
     match whole.and_then(|segment| run(&job, &[segment], &Picture::default(), &output, &preset)) {
         Ok(done) => println!("Done!     {} ({:.2} MB)", done.path, done.bytes as f64 / 1000.0 / 1000.0),
