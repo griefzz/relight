@@ -237,9 +237,9 @@ pub enum Source {
     #[cfg(test)]
     Pattern { lasting: f64 },
     /// A black picture in real time, flashing white for a moment 0.7 s into every 3 s: not
-    /// in step with the chunks, so being a chunk out shows.
+    /// in step with the chunks, so being a chunk out shows. Lasts this many seconds.
     #[cfg(test)]
-    Flashes,
+    Flashes { lasting: f64 },
     /// A test pattern on a PC where the NVIDIA encoder won't open.
     #[cfg(test)]
     NoNvidia,
@@ -272,8 +272,8 @@ impl Stream {
             #[cfg(test)]
             Source::Pattern { lasting } => format!("testsrc2=size=320x180:rate={fps}:duration={lasting},realtime,{origin}"),
             #[cfg(test)]
-            Source::Flashes => format!(
-                r"color=black:size=320x180:rate={fps}:duration=3600,drawbox=t=fill:c=white:enable='between(mod(t\,3)\,0.7\,0.9)',realtime,{origin}"
+            Source::Flashes { lasting } => format!(
+                r"color=black:size=320x180:rate={fps}:duration={lasting},drawbox=t=fill:c=white:enable='between(mod(t\,3)\,0.7\,0.9)',realtime,{origin}"
             ),
             #[cfg(test)]
             Source::NoNvidia => format!("testsrc2=size=320x180:rate={fps}:duration=3600,realtime,{origin}"),

@@ -28,7 +28,7 @@ export function ReplayButtons() {
     return (
       <div className="replay-buttons">
         {replay.interrupted ? (
-          <button disabled title="The screen capture stopped, and is starting again. What was held has gone.">
+          <button disabled title="The screen capture stopped, and is starting again. What it's holding is kept.">
             Replay reconnecting…
           </button>
         ) : (

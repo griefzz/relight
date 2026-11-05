@@ -6,8 +6,9 @@
 //! game: the picture, nearly all of what's held, goes to temporary files as it's captured.
 //! Left going for hours, it has to get through what a short recording never meets: a game
 //! changing the display mode, the screen locking, the PC sleeping, a headset unplugged. When
-//! the capture ends it's started again, and what was held goes with it (it might not even be
-//! the same size); when a sound device goes, the next one takes over.
+//! the capture ends it's started again and what was held stays, to be saved along with what
+//! comes next (unless the PC slept, when it's long gone); when a sound device goes, the next
+//! one takes over.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,7 +96,7 @@ impl Replay {
         Saver(self.held.clone())
     }
 
-    /// Whether the capture has ended and is waiting to start again, so there's nothing to save.
+    /// Whether the capture has ended and is waiting to start again, so nothing new is coming.
     pub fn is_interrupted(&self) -> bool {
         self.held.interrupted.load(Ordering::Relaxed)
     }
@@ -141,14 +142,16 @@ impl Saver {
         if let Some(problem) = held.picture.bounce_problem() {
             warnings.push(format!("Bounce to disk isn't working, so instant replay is holding the picture in memory: {problem}"));
         }
+        if clip.cut_short {
+            warnings.push("The screen changed partway through what was held, most likely its size, so this replay only goes back to then.".into());
+        }
         for tape in tapes {
             match tape.save(clip.start, clip.length, scratch.path()) {
                 Ok(saved) => sound.push(saved),
                 Err(e) => warnings.push(format!("Couldn't save the {} sound: {e}", tape.title.to_lowercase())),
             }
         }
-        let picture = scratch.path().join("screen.mp4");
-        clip.write(&picture).map_err(|e| format!("Couldn't save the replay: {e}"))?;
+        let picture = clip.write_in(scratch.path()).map_err(|e| format!("Couldn't save the replay: {e}"))?;
 
         let partial = Partial::new(output);
         let job = Job::silent().in_background();
@@ -204,16 +207,21 @@ fn keep_going(
     let mut retry_at = Instant::now();
     let mut retry_wait = FIRST_RETRY;
     while let Err(mpsc::RecvTimeoutError::Timeout) = stop.recv_timeout(CHECK_EVERY) {
-        let now = SystemTime::now();
-        let jump = now.duration_since(last_check).unwrap_or_else(|e| e.duration());
-        last_check = now;
+        let jump = SystemTime::now().duration_since(last_check).unwrap_or_else(|e| e.duration());
 
         let failed = feed.as_ref().is_some_and(|feed| feed.has_ended() || held.picture.quiet_for() > LONGEST_QUIET);
-        if failed || (feed.is_some() && jump > LARGEST_JUMP) {
+        let slept = jump > LARGEST_JUMP;
+        if failed || (feed.is_some() && slept) {
             if let Some(feed) = feed.take() {
                 feed.stop();
             }
-            held.picture.clear();
+            // Chunks are placed by the clock, which may have been changed, so those from before
+            // a jump can't be trusted to fall in the right place. Otherwise they're still good.
+            if slept {
+                held.picture.clear();
+            } else {
+                held.picture.stream_ended();
+            }
             held.interrupted.store(true, Ordering::Relaxed);
             changed();
             retry_at = Instant::now();
@@ -237,6 +245,9 @@ fn keep_going(
         if reopened {
             held.show(&sound);
         }
+        // Only the wait above counts towards a jump: a capture slow to start again, as it can be
+        // with a game loading, isn't the PC sleeping.
+        last_check = SystemTime::now();
     }
 
     held.picture.close();
@@ -363,10 +374,10 @@ mod tests {
         out.stdout
     }
 
-    /// When each flash starts, in seconds, in a video at 30 fps: every frame is shrunk to a
-    /// single grey pixel, so each byte is how bright a frame is.
+    /// When each flash starts, in seconds: every frame is shrunk to a single grey pixel, so
+    /// each byte is how bright a frame is, at a steady 30 fps that fills out any gap.
     fn flashes_in(path: &Path) -> Vec<f64> {
-        let brightness = decoded(path, &["-map", "0:v", "-vf", "scale=1:1,format=gray", "-f", "rawvideo"]);
+        let brightness = decoded(path, &["-map", "0:v", "-vf", "fps=30,scale=1:1,format=gray", "-f", "rawvideo"]);
         let rises = (1..brightness.len()).filter(|&i| brightness[i] > 128 && brightness[i - 1] <= 128);
         rises.map(|i| i as f64 / 30.0).collect()
     }
@@ -394,7 +405,7 @@ mod tests {
     #[ignore = "needs ffmpeg"]
     fn the_sound_stays_in_step_with_the_picture() {
         let dir = tempfile::tempdir().unwrap();
-        let (replay, _) = Replay::start_from(Source::Flashes, no_sound(), 8, false, || {}).unwrap();
+        let (replay, _) = Replay::start_from(Source::Flashes { lasting: 3600.0 }, no_sound(), 8, false, || {}).unwrap();
         // The first chunk is the picture's time zero, which says when that was by the clock.
         thread::sleep(Duration::from_secs(4));
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
@@ -410,6 +421,38 @@ mod tests {
 
         let (flashes, clicks) = (flashes_in(&output), clicks_in(&output));
         assert!(flashes.len() >= 2, "flashes at {flashes:?}");
+        assert_eq!(flashes.len(), clicks.len(), "flashes at {flashes:?}, clicks at {clicks:?}");
+        for (flash, click) in flashes.iter().zip(&clicks) {
+            // A frame is 33 ms; people notice sound out of step from about twice that.
+            assert!((flash - click).abs() < 0.05, "flashes at {flashes:?}, clicks at {clicks:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs ffmpeg"]
+    fn the_sound_stays_in_step_across_the_capture_starting_again() {
+        let dir = tempfile::tempdir().unwrap();
+        // Its ffmpeg finishes after 7 seconds, having flashed 3 times, and starts again. On disk,
+        // to cover a clip of files too.
+        let (replay, _) = Replay::start_from(Source::Flashes { lasting: 7.0 }, no_sound(), 60, true, || {}).unwrap();
+        // Well into the second go, with a couple of its flashes gone by.
+        thread::sleep(Duration::from_secs(14));
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+        let starts = replay.held.picture.clip(now, 1e6, Duration::ZERO).unwrap().stream_starts();
+        let [first, second] = starts[..] else { panic!("streams starting at {starts:?}") };
+        assert!(second - first > 7.0, "streams starting at {starts:?}");
+
+        // A click each time the picture flashes, by the same clock the sound's placed by, on a
+        // tape for each stream as each flashes from its own start.
+        let tapes = [Tape::of_clicks("Game", first, 0.7, 3.0, 7.0), Tape::of_clicks("Microphone", second, 0.7, 3.0, 60.0)];
+        replay.held.tapes.lock().unwrap().extend(tapes);
+
+        let output = dir.path().join("replay.mp4");
+        replay.saver().save(SystemTime::now(), &output).unwrap();
+        replay.stop();
+
+        let (flashes, clicks) = (flashes_in(&output), clicks_in(&output));
+        assert!(flashes.len() >= 5, "flashes at {flashes:?}");
         assert_eq!(flashes.len(), clicks.len(), "flashes at {flashes:?}, clicks at {clicks:?}");
         for (flash, click) in flashes.iter().zip(&clicks) {
             // A frame is 33 ms; people notice sound out of step from about twice that.
@@ -502,7 +545,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs ffmpeg"]
-    fn a_capture_that_ends_is_started_again_with_a_fresh_buffer() {
+    fn a_capture_that_ends_is_started_again_and_what_it_held_is_kept() {
         let dir = tempfile::tempdir().unwrap();
         let changes = Arc::new(AtomicUsize::new(0));
         let seen = changes.clone();
@@ -524,8 +567,10 @@ mod tests {
         thread::sleep(Duration::from_millis(2500));
         let saved = replay.saver().save(SystemTime::now(), &output).unwrap();
         replay.stop();
-        // Only what's come since it started again, not the 3 seconds before.
+        // The 3 seconds before it started again, the moment it took, and what's come since.
         let info = relight_ffmpeg::probe(&saved.path).unwrap();
-        assert!(info.duration < 3.0, "lasts {} s", info.duration);
+        assert!((5.0..=8.0).contains(&info.duration), "lasts {} s", info.duration);
+        let frames = frames_in(&saved.path);
+        assert!(frames >= 90 + 60, "{frames} frames in {} s", info.duration);
     }
 }

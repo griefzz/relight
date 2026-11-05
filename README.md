@@ -88,8 +88,10 @@ happened. Nothing reaches the disk until you save, unless you turn on bounce to 
   slow a game down; relight says so when it starts.
 - Starting a recording stops replay and clears what it holds; a fresh one starts when the
   recording's done.
-- If the screen capture stops (a game changing the display mode, the screen locking, the
-  PC sleeping) it starts again by itself, and what it held is gone.
+- If the screen capture stops (a game changing the display mode, the screen locking) it
+  starts again by itself, and a clip reaches back across that as usual, holding on the last
+  frame for the moment there was no picture. It can't reach back past the screen changing
+  size, or the PC sleeping: a clip only goes back to then, and says so if the size changed.
 
 ## Keys
 
