@@ -1,5 +1,7 @@
-// Updates: looked for when relight starts and every few hours after (it can sit in the
-// tray for days), downloaded in the background, and installed when the user says.
+// Updates: looked for when the window opens and every few hours it's open, downloaded in the
+// background, and installed when the user says. There's no looking while it's unloaded to the
+// tray, which can be for days: it looks on coming back. One downloaded and waiting lives
+// here, so the window stays loaded for it rather than downloading it all over again.
 
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";

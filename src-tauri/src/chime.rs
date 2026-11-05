@@ -1,5 +1,5 @@
-//! The sounds that say a replay was saved, or wasn't: from inside a game, where the window
-//! can't be seen, they're the only word there is.
+//! The sounds that say a replay was saved, or wasn't, for those who turn them on: from inside
+//! a game, where the window can't be seen, they're the only word there is.
 //!
 //! Each plays as soon as the hotkey's pressed, after the moment the replay ends on, so it
 //! isn't on that replay; a later replay reaching back this far will hear it.

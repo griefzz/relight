@@ -311,3 +311,11 @@ export function loadProject(media: MediaInfo[], clips: Clip[], path: string, cha
 }
 
 export const markSaved = (path: string) => set({ projectPath: path, dirty: false });
+
+// The window being unloaded to the tray, and coming back
+
+/** The whole editor as text, undo history and all, for `restoreEditor` to take up in a new window. */
+export const stashEditor = () => JSON.stringify({ ...get(), playing: false, dragStart: null });
+
+/** Takes the editor up where `stashEditor` left it, with the player following. */
+export const restoreEditor = (stash: string) => set({ ...(JSON.parse(stash) as Editor), seeks: get().seeks + 1 });

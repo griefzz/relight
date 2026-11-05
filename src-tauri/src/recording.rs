@@ -133,7 +133,7 @@ pub fn toggle(app: &AppHandle) {
         *recorder.phase.lock().unwrap() = match started {
             Ok((recording, output)) => Phase::Recording(recording, output),
             Err(e) => {
-                let _ = app.emit("recorder-error", e);
+                window::deliver(&app, "recorder-error", e);
                 Phase::Idle
             }
         };
@@ -216,10 +216,10 @@ fn finish(app: &AppHandle, recording: Recording, output: PathBuf) {
     recorder.saving.fetch_sub(1, Ordering::Relaxed);
     announce(app);
     window::show_window(app);
-    let _ = match result {
-        Ok(recorded) => app.emit("recorded", recorded),
-        Err(e) => app.emit("recorder-error", e),
-    };
+    match result {
+        Ok(recorded) => window::deliver(app, "recorded", recorded),
+        Err(e) => window::deliver(app, "recorder-error", e),
+    }
 }
 
 /// Starts instant replay, or if a recording's going, has it start when that's done. Off
@@ -275,7 +275,8 @@ pub fn toggle_replay(app: &AppHandle) {
 }
 
 /// Saves what instant replay holds, up to right now. From a game, the window can't be
-/// brought up: this says how it went with a sound, and leaves the rest for later.
+/// brought up: how it went is told with a sound, if that's turned on, and otherwise waits
+/// for the window.
 pub fn save_replay(app: &AppHandle) {
     let pressed = SystemTime::now();
     let recorder = app.state::<Recorder>();
@@ -288,12 +289,12 @@ pub fn save_replay(app: &AppHandle) {
     let saver = match saver {
         Ok(saver) => saver,
         Err(why) => {
-            chime::failed();
-            let _ = app.emit("recorder-error", why);
+            alert(app, chime::failed);
+            window::deliver(app, "recorder-error", why);
             return;
         }
     };
-    chime::saved();
+    alert(app, chime::saved);
     recorder.replays_saving.fetch_add(1, Ordering::Relaxed);
     announce(app);
     let app = app.clone();
@@ -308,14 +309,21 @@ pub fn save_replay(app: &AppHandle) {
         });
         recorder.replays_saving.fetch_sub(1, Ordering::Relaxed);
         announce(&app);
-        let _ = match result {
-            Ok(recorded) => app.emit("replay-saved", recorded),
+        match result {
+            Ok(recorded) => window::deliver(&app, "replay-saved", recorded),
             Err(e) => {
-                chime::failed();
-                app.emit("recorder-error", e)
+                alert(&app, chime::failed);
+                window::deliver(&app, "recorder-error", e);
             }
-        };
+        }
     });
+}
+
+/// Plays one of the chimes, unless they've been turned off.
+fn alert(app: &AppHandle, chime: fn()) {
+    if app.state::<SettingsState>().get().replay_chime {
+        chime();
+    }
 }
 
 /// Starts instant replay with the settings as they are now. With the turn held.
@@ -329,12 +337,12 @@ fn begin_replay(app: &AppHandle, recorder: &Recorder) {
     *recorder.replay.lock().unwrap() = match started {
         Ok((replay, warnings)) => {
             if !warnings.is_empty() {
-                let _ = app.emit("recorder-error", warnings.join("\n"));
+                window::deliver(app, "recorder-error", warnings.join("\n"));
             }
             ReplayPhase::On(replay)
         }
         Err(e) => {
-            let _ = app.emit("recorder-error", e);
+            window::deliver(app, "recorder-error", e);
             ReplayPhase::Off
         }
     };

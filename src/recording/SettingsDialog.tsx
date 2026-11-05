@@ -195,6 +195,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 Include the microphone
               </label>
             </Option>
+            <Option label="Sound alert" hint="A lower one if it couldn't be saved. Other replays reaching back that far may pick it up.">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={settings.replayChime}
+                  onChange={(e) => change({ replayChime: e.target.checked })}
+                />
+                Play a sound when saving a replay
+              </label>
+            </Option>
           </div>
 
           <h3>Window</h3>
@@ -206,6 +216,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             />
             Keep running in the tray when the window is closed, so the hotkeys still work
           </label>
+          <p className="hint">The window is unloaded while it's closed, to free its memory, and comes back as you left it.</p>
         </>
       )}
       {problem && <pre className="error-text">{problem}</pre>}

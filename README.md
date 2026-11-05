@@ -48,8 +48,11 @@ above the first clip's.
 - **Balancing them:** select a recording's clips and the timeline's toolbar shows a Game and
   a Mic slider (0 to 200%; double-click one to put it back). The player and the export both
   use them.
-- Closing the window leaves relight in the tray (a setting), so the hotkey keeps working.
-  **Quit** is in the tray menu.
+- Closing the window leaves relight in the tray (a setting), so the hotkeys keep working.
+  **Quit** is in the tray menu. The window is unloaded there, freeing its memory for your
+  game, and comes back in a moment as you left it, unsaved changes and undo included. It
+  only hides, staying loaded, while a dialog is open, an export is running or an update is
+  waiting to install.
 - **Hotkey does nothing?** Another program holds it. Windows gives a hotkey to only one
   program (ZoomIt uses Ctrl + 5, for example).
 
@@ -69,10 +72,11 @@ happened. Nothing reaches the disk until you save.
 - It uses the recording settings for the screen, frame rate and game sound. The screen the
   mouse is on means the one it's on when replay starts. The microphone is off unless you
   turn it on under Instant replay in Settings.
-- Saving takes a couple of seconds, as the newest frames are still being encoded. A chime
-  says it's on its way (a lower one if it failed), the window stays out of the way of your
-  game, and the clip goes in `Videos\relight` and the media bin. A clip is the length asked
-  for and up to 2 seconds more, as it has to start on a keyframe.
+- Saving takes a couple of seconds, as the newest frames are still being encoded. The window
+  stays out of the way of your game, and the clip goes in `Videos\relight` and the media
+  bin. To hear that it's on its way, turn on the sound alert in Settings: a chime when you
+  save, and a lower one if it failed. A clip is the length asked for and up to 2 seconds
+  more, as it has to start on a keyframe.
 - Without an NVIDIA card it encodes with x264 on the CPU, all the time it's on, which can
   slow a game down; relight says so when it starts.
 - Starting a recording stops replay and clears what it holds; a fresh one starts when the
@@ -129,8 +133,8 @@ git push origin main v0.2.0
 ```
 
 The release workflow builds the setup `.exe`, signs it, and publishes it as a GitHub
-release with a `latest.json`. Installed copies look for that at startup and every few
-hours, download a newer version, and offer it in the top bar. Signing needs the
+release with a `latest.json`. Installed copies look for that when the window opens and
+every few hours it's open, download a newer version, and offer it in the top bar. Signing needs the
 `TAURI_SIGNING_PRIVATE_KEY` repository secret, whose public half is in `tauri.conf.json`.
 
 The ffmpeg the installers ship with is a pinned build from

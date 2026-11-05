@@ -12,12 +12,16 @@ import {
   onReplaySaved,
   openMedia,
   quitApp,
+  takeEditor,
   takeNotice,
+  unloadToTray,
+  windowReady,
+  type Recorded,
 } from "./api";
 import { clipLength, totalLength } from "./editor/clips";
 import { chooseProject, okToDiscard, openPaths, saveProject, startNewProject } from "./editor/files";
 import { useShortcuts } from "./editor/shortcuts";
-import { addSavedReplay, seek, useEditor } from "./editor/store";
+import { addSavedReplay, restoreEditor, seek, stashEditor, useEditor } from "./editor/store";
 import { ExportDialog } from "./export/ExportDialog";
 import { Viewer } from "./player/Viewer";
 import { RecordButton } from "./recording/RecordButton";
@@ -30,7 +34,7 @@ import { Timeline } from "./timeline/Timeline";
 import { fileName } from "./ui/format";
 import { GearIcon } from "./ui/icons";
 import { UpdateButton } from "./updates/UpdateButton";
-import { followUpdates } from "./updates/updates";
+import { followUpdates, useUpdate } from "./updates/updates";
 
 /** Something to leave running in the background: what to wait for before closing. */
 async function stillGoing() {
@@ -39,6 +43,20 @@ async function stillGoing() {
   if (status.state !== "idle") return "A recording is still going. Stop it first, then close.";
   if (replay.state === "on" && replay.saving) return "A replay is still being saved. Wait for it, then close.";
   return null;
+}
+
+/**
+ * Closed with "keep running" on: the page unloads, as it takes more memory than the rest of
+ * relight together, and the editor's kept to pick up in the next one. What can't carry over
+ * keeps it loaded, just hidden: a dialog (`busy`), an export it's showing, an update it's
+ * holding ready to install.
+ */
+async function leaveForTray(busy: boolean) {
+  if (busy || useUpdate.getState().ready || (await isExporting())) {
+    await getCurrentWindow().hide();
+    return;
+  }
+  await unloadToTray(stashEditor(), useEditor.getState().dirty).catch(() => getCurrentWindow().hide());
 }
 
 export default function App() {
@@ -77,37 +95,65 @@ export default function App() {
       .catch(() => {});
   }, [name, dirty, recording]);
 
-  // The recorder: a finished recording goes on the end of the timeline, with the
-  // playhead at its start.
+  // What the app has to tell the window, as it happens or from while there was no window.
   useEffect(() => {
+    // A finished recording goes on the end of the timeline, with the playhead at its start.
+    const recorded = (done: Recorded) =>
+      attempt(async () => {
+        await openPaths([done.path]);
+        const { clips } = useEditor.getState();
+        seek(totalLength(clips) - clipLength(clips[clips.length - 1]));
+        if (done.warnings.length) throw new Error(`Recorded, but:\n${done.warnings.join("\n")}`);
+      });
+    // A saved replay waits in the bin: it may be one of many, saved from inside a game. It
+    // leaves any error showing, as nobody's been looking at the window to have seen it.
+    const replaySaved = (saved: Recorded) =>
+      openMedia(saved.path)
+        .then((info) => {
+          addSavedReplay(info);
+          if (saved.warnings.length) report(`Replay saved, but:\n${saved.warnings.join("\n")}`);
+        })
+        .catch(report);
+    const openFile = (path: string) => attempt(() => openPaths([path]));
+    const quitRequested = async () => {
+      const going = await isExporting();
+      if (going) {
+        await message("An export is still running. Cancel it first, then quit.", { title: "Exporting", kind: "info" });
+      } else if (await okToDiscard()) {
+        await quitApp();
+      }
+    };
+
     const stops = [
       followRecorder(),
-      onRecorded((recorded) =>
-        attempt(async () => {
-          await openPaths([recorded.path]);
-          const { clips } = useEditor.getState();
-          seek(totalLength(clips) - clipLength(clips[clips.length - 1]));
-          if (recorded.warnings.length) throw new Error(`Recorded, but:\n${recorded.warnings.join("\n")}`);
-        }),
-      ),
-      // A saved replay waits in the bin: it may be one of many, saved from inside a game.
-      onReplaySaved((saved) =>
-        attempt(async () => {
-          addSavedReplay(await openMedia(saved.path));
-          if (saved.warnings.length) throw new Error(`Replay saved, but:\n${saved.warnings.join("\n")}`);
-        }),
-      ),
+      onRecorded(recorded),
+      onReplaySaved(replaySaved),
       onRecorderError(report),
-      onOpenFile((path) => attempt(() => openPaths([path]))),
-      onQuitRequested(async () => {
-        const going = await isExporting();
-        if (going) {
-          await message("An export is still running. Cancel it first, then quit.", { title: "Exporting", kind: "info" });
-        } else if (await okToDiscard()) {
-          await quitApp();
-        }
-      }),
+      onOpenFile(openFile),
+      onQuitRequested(quitRequested),
     ];
+
+    // In this order: the editor as the last window left it, then what's happened since, so
+    // that goes on top of it, and only once it's being listened for.
+    const takeUp = async () => {
+      const editor = await takeEditor();
+      if (editor) restoreEditor(editor);
+      await Promise.all(stops);
+      const errors: string[] = [];
+      let quit = false;
+      for (const letter of await windowReady()) {
+        if (letter.event === "recorded") recorded(letter.payload);
+        else if (letter.event === "replay-saved") replaySaved(letter.payload);
+        else if (letter.event === "open-file") openFile(letter.payload);
+        else if (letter.event === "recorder-error") errors.push(letter.payload);
+        else quit = true;
+      }
+      // Last, so nothing that clears errors as it starts takes these with it.
+      if (errors.length) report(errors.join("\n"));
+      if (quit) await quitRequested();
+    };
+    takeUp().catch(report);
+
     takeNotice().then((notice) => notice && report(notice));
     return () => {
       for (const stop of stops) stop.then((unlisten) => unlisten());
@@ -148,10 +194,10 @@ export default function App() {
 
   useEffect(() => {
     const unlisten = getCurrentWindow().onCloseRequested(async (event) => {
-      // Kept running, the window just goes to the tray, and everything carries on.
+      // Kept running, the window goes to the tray, and everything carries on.
       if (useRecording.getState().settings?.keepRunning) {
         event.preventDefault();
-        await getCurrentWindow().hide();
+        await leaveForTray(busy.current);
         return;
       }
       const going = await stillGoing();

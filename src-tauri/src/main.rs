@@ -39,6 +39,7 @@ fn main() {
                 .build(),
         )
         .manage(window::InitialFile::from_command_line())
+        .manage(window::Keeper::default())
         .manage(export::Exports::default())
         .manage(recording::Recorder::default())
         .setup(|app| {
@@ -56,6 +57,9 @@ fn main() {
             window::take_notice,
             window::updates_on,
             window::quit,
+            window::unload_to_tray,
+            window::take_editor,
+            window::window_ready,
             media::open_media,
             media::previews,
             media::preview_peaks,
@@ -76,6 +80,15 @@ fn main() {
             recording::replay_status,
             recording::recording_sources,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // The last window going would end the app, but one unloaded to the tray is meant
+            // to. Asked to by `exit`, there's a code, and it ends all the same.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event
+                && app.state::<window::Keeper>().in_tray()
+            {
+                api.prevent_exit();
+            }
+        });
 }

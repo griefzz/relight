@@ -3,11 +3,11 @@
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Manager, Wry};
 
 use crate::recording::{self, ReplayStatus, Status};
 use crate::settings::SettingsState;
-use crate::window::show_window;
+use crate::window::{ask_to_quit, show_window};
 
 const ID: &str = "relight";
 
@@ -33,11 +33,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             "record" => recording::toggle(app),
             "replay" => recording::toggle_replay(app),
             "save-replay" => recording::save_replay(app),
-            "quit" => {
-                // The window decides, as it may have unsaved changes to ask about.
-                show_window(app);
-                let _ = app.emit("quit-requested", ());
-            }
+            "quit" => ask_to_quit(app),
             _ => {}
         })
         .on_tray_icon_event(|icon, event| {

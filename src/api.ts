@@ -127,6 +127,8 @@ export interface Settings {
   replaySeconds: number;
   /** Whether instant replay holds the microphone too. */
   replayMicrophone: boolean;
+  /** Whether saving a replay plays a sound to say how it went. */
+  replayChime: boolean;
   /** Where recordings go; null for a relight folder in Videos. */
   folder: string | null;
   /** Closing the window leaves relight in the tray, so the hotkey still works. */
@@ -221,6 +223,23 @@ export const onQuitRequested = (handle: () => void) => listen("quit-requested", 
 
 /** Saves any recording going, then quits. */
 export const quitApp = () => invoke<void>("quit");
+
+/** Unloads the window to the tray, keeping `editor` for the next one. Nothing runs here after this. */
+export const unloadToTray = (editor: string, dirty: boolean) => invoke<void>("unload_to_tray", { editor, dirty });
+
+/** The editor as the last window left it, if it was unloaded to the tray; once only. */
+export const takeEditor = () => invoke<string | null>("take_editor");
+
+/** What the window's told as it happens, and is kept for it if there's no window. */
+export type Letter =
+  | { event: "recorded"; payload: Recorded }
+  | { event: "replay-saved"; payload: Recorded }
+  | { event: "recorder-error"; payload: string }
+  | { event: "open-file"; payload: string }
+  | { event: "quit-requested"; payload: null };
+
+/** Says the page is listening from now on, and returns all that happened while it wasn't. */
+export const windowReady = () => invoke<Letter[]>("window_ready");
 
 /** Something that went wrong starting up (the hotkey taken), the first time it's asked. */
 export const takeNotice = () => invoke<string | null>("take_notice");

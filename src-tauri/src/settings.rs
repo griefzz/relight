@@ -38,6 +38,8 @@ pub struct Settings {
     /// Whether instant replay holds the microphone too. Separate from a recording's, as it's
     /// listening for as long as replay is on, not just while recording's asked for.
     pub replay_microphone: bool,
+    /// Whether saving a replay plays a sound to say how it went.
+    pub replay_chime: bool,
     /// Where recordings are saved; none for a relight folder in Videos.
     pub folder: Option<String>,
     /// Closing the window hides it to the tray, so the hotkey keeps working.
@@ -59,6 +61,7 @@ impl Default for Settings {
             replay_save_hotkey: "Alt+F8".into(),
             replay_seconds: 30,
             replay_microphone: false,
+            replay_chime: false,
             folder: None,
             keep_running: true,
         }
@@ -249,6 +252,7 @@ mod tests {
         assert_eq!(settings.fps, 30);
         assert_eq!(settings.replay_seconds, 30);
         assert!(!settings.replay_microphone, "the microphone stays off unless asked for");
+        assert!(!settings.replay_chime, "the chime stays off unless asked for");
         assert_eq!(settings.replay_save_hotkey, "Alt+F8");
     }
 
@@ -274,6 +278,7 @@ mod tests {
         assert!(!settings.replay_differs(&settings.clone()));
         assert!(!settings.replay_differs(&Settings { microphone: false, ..settings.clone() }));
         assert!(!settings.replay_differs(&Settings { hotkey: "F9".into(), ..settings.clone() }));
+        assert!(!settings.replay_differs(&Settings { replay_chime: true, ..settings.clone() }), "losing what it holds over a sound would be silly");
         assert!(settings.replay_differs(&Settings { replay_seconds: 60, ..settings.clone() }));
         assert!(settings.replay_differs(&Settings { replay_microphone: true, ..settings.clone() }));
         assert!(settings.replay_differs(&Settings { fps: 30, ..settings.clone() }));

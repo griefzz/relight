@@ -6,11 +6,17 @@ import {
   appendMedia,
   clipsOf,
   copySelection,
+  markSaved,
   newProject,
   paste,
   redo,
   removeMedia,
+  restoreEditor,
+  seek,
   selectAll,
+  setPlaying,
+  split,
+  stashEditor,
   undo,
   useEditor,
 } from "./store";
@@ -123,6 +129,81 @@ describe("taking a video out of the bin", () => {
     removeMedia("nowhere.mp4");
     expect(binned()).toEqual(["a.mp4"]);
     expect(state().dirty).toBe(false);
+  });
+});
+
+describe("the window being unloaded to the tray and coming back", () => {
+  /** An editor with something of everything in it. */
+  function inUse() {
+    addMedia(video("a.mp4"));
+    addMedia(video("b.mp4"));
+    addMedia(video("gone.mp4"));
+    appendMedia("a.mp4");
+    appendMedia("b.mp4");
+    appendMedia("gone.mp4");
+    removeMedia("gone.mp4");
+    seek(4);
+    split();
+    selectAll();
+    copySelection();
+    markSaved("trip.relight");
+    seek(12);
+    split();
+    return JSON.parse(JSON.stringify(state()));
+  }
+
+  it("comes back as it was: clips, bin, undo history, clipboard, selection, project and unsaved changes", () => {
+    const before = inUse();
+    const stash = stashEditor();
+    newProject();
+    expect(state().clips).toEqual([]);
+
+    restoreEditor(stash);
+
+    const { seeks, ...after } = JSON.parse(JSON.stringify(state()));
+    const { seeks: seeksBefore, ...rest } = before;
+    expect(after).toEqual(rest);
+    expect(seeks).toBeGreaterThan(seeksBefore - 1);
+    expect(state().dirty).toBe(true);
+    expect(state().projectPath).toBe("trip.relight");
+  });
+
+  it("can undo edits made before it went", () => {
+    inUse();
+    const clipsBefore = state().clips.length;
+    restoreEditor(stashEditor());
+    undo();
+    expect(state().clips.length).toBe(clipsBefore - 1);
+    redo();
+    expect(state().clips.length).toBe(clipsBefore);
+  });
+
+  it("can undo back to a video taken out of the bin before it went", () => {
+    inUse();
+    restoreEditor(stashEditor());
+    undo();
+    undo();
+    undo();
+    expect(onTimeline()).toContain("gone.mp4");
+    expect(state().media["gone.mp4"]).toBeDefined();
+  });
+
+  it("isn't playing when it comes back, or partway through a drag", () => {
+    inUse();
+    setPlaying(true);
+    useEditor.setState({ dragStart: state().clips });
+    restoreEditor(stashEditor());
+    expect(state().playing).toBe(false);
+    expect(state().dragStart).toBeNull();
+  });
+
+  it("has the player move to where it was", () => {
+    inUse();
+    const stash = stashEditor();
+    const seeks = state().seeks;
+    restoreEditor(stash);
+    expect(state().seeks).toBe(seeks + 1);
+    expect(state().playhead).toBe(12);
   });
 });
 
