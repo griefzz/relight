@@ -3091,7 +3091,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "relight"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "relight-ffmpeg",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "relight-ffmpeg"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ffmpeg-sidecar",
  "serde",
@@ -3122,7 +3122,7 @@ dependencies = [
 
 [[package]]
 name = "relight-media"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "relight-ffmpeg",
  "serde",
@@ -3131,7 +3131,7 @@ dependencies = [
 
 [[package]]
 name = "relight-recorder"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "ffmpeg-sidecar",
