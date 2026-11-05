@@ -4,7 +4,7 @@ import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { type MediaInfo, loadProjectFile, openMedia, saveProjectFile } from "../api";
 import { besidePath, fileName } from "../ui/format";
 import { parse, serialize } from "./project";
-import { addMedia, appendMedia, loadProject, markSaved, newProject, useEditor } from "./store";
+import { addMedia, appendMedia, clipsOf, loadProject, markSaved, newProject, removeMedia, useEditor } from "./store";
 
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "mkv", "webm", "m4v", "avi", "ts", "flv"];
 
@@ -38,6 +38,20 @@ export async function openPaths(paths: string[]) {
     }
   }
   if (errors.length) throw new Error(errors.join("\n"));
+}
+
+/** Takes a video out of the project, asking first if that takes clips off the timeline too. */
+export async function removeFromProject(path: string) {
+  const clips = clipsOf(path);
+  if (clips) {
+    const these = clips === 1 ? "1 clip" : `${clips} clips`;
+    const sure = await ask(
+      `${fileName(path)} has ${these} on the timeline, which will be taken off too. The file itself stays where it is.`,
+      { title: "Remove from the project", kind: "warning", okLabel: "Remove", cancelLabel: "Keep" },
+    );
+    if (!sure) return;
+  }
+  removeMedia(path);
 }
 
 export async function importMedia() {

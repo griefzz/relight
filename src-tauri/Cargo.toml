@@ -26,4 +26,4 @@ tauri-plugin-single-instance = "2.5.4"
 tauri-plugin-updater = "2.14.0"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

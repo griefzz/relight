@@ -69,6 +69,20 @@ pub fn hide_window(command: &mut Command) -> &mut Command {
     command
 }
 
+/// Runs a command below normal priority (and without a console window), so work nobody's
+/// waiting on doesn't take time from a game.
+fn below_normal(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// The error for ffmpeg not starting, which almost always means it isn't installed.
 pub fn start_failed(e: impl Display) -> String {
     format!("Couldn't start ffmpeg ({e}). Is it installed and on your PATH?")
@@ -100,16 +114,22 @@ pub struct Job {
     /// `from + share`.
     from: f64,
     share: f64,
+    background: bool,
 }
 
 impl Job {
     pub fn new(cancelled: Arc<AtomicBool>, report: impl Fn(Report) + Send + Sync + 'static) -> Self {
-        Self { cancelled, report: Arc::new(report), from: 0.0, share: 1.0 }
+        Self { cancelled, report: Arc::new(report), from: 0.0, share: 1.0, background: false }
     }
 
     /// A job nobody watches or cancels.
     pub fn silent() -> Self {
         Self::new(Arc::new(AtomicBool::new(false)), |_| {})
+    }
+
+    /// The same job, with its ffmpeg runs giving way to anything else that wants the CPU.
+    pub fn in_background(self) -> Self {
+        Self { background: true, ..self }
     }
 
     /// The same job, for one run of several in a step: its progress counts as `from` to
@@ -142,7 +162,11 @@ pub fn run(job: &Job, what: &str, duration: f64, args: Vec<OsString>) -> Result<
     if job.is_cancelled() {
         return Err(CANCELLED.into());
     }
-    let mut child = command().hide_banner().overwrite().args(args).spawn().map_err(start_failed)?;
+    let mut ffmpeg = command();
+    if job.background {
+        below_normal(ffmpeg.as_inner_mut());
+    }
+    let mut child = ffmpeg.hide_banner().overwrite().args(args).spawn().map_err(start_failed)?;
 
     let mut errors = Vec::new();
     let events = child.iter().map_err(|e| format!("Couldn't read ffmpeg's output: {e}"))?;

@@ -3,7 +3,16 @@ import { join, videoDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { hotkeyWorking, pauseHotkey, recordingSources, type Screen, type Settings, type Sources } from "../api";
 import { Option, Segmented } from "../ui/controls";
-import { changeSettings, useRecording } from "./recorder";
+import { changeSettings, replayMemory, useRecording } from "./recorder";
+
+/** How long instant replay can hold, in seconds. */
+const REPLAY_LENGTHS: [number, string][] = [
+  [15, "15 seconds"],
+  [30, "30 seconds"],
+  [60, "1 minute"],
+  [120, "2 minutes"],
+  [300, "5 minutes"],
+];
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -12,15 +21,22 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [sources, setSources] = useState<Sources | null>(null);
   const [defaultFolder, setDefaultFolder] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
-  const [hotkeyOk, setHotkeyOk] = useState(true);
-  const checkHotkey = () => hotkeyWorking().then(setHotkeyOk, () => {});
+  /** The hotkeys that another program has. */
+  const [taken, setTaken] = useState<string[]>([]);
+  const checkHotkeys = async () => {
+    const now = useRecording.getState().settings;
+    if (!now) return;
+    const hotkeys = [now.hotkey, now.replayStartHotkey, now.replayStopHotkey, now.replaySaveHotkey];
+    const working = await Promise.all(hotkeys.map((hotkey) => hotkeyWorking(hotkey).catch(() => true)));
+    setTaken(hotkeys.filter((_, i) => !working[i]));
+  };
 
   useEffect(() => {
     const d = dialog.current;
     if (d && !d.open) d.showModal();
     // Not the hotkey field, which would start listening for a new hotkey straight away.
     done.current?.focus();
-    checkHotkey();
+    checkHotkeys();
     recordingSources().then(setSources, (e) => setProblem(`Couldn't list the screens and sound devices: ${e}`));
     videoDir()
       .then((videos) => join(videos, "relight"))
@@ -36,8 +52,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     } catch (e) {
       setProblem(String(e));
     }
-    checkHotkey();
+    checkHotkeys();
   };
+
+  /** A hotkey's field, in a row of its own. */
+  const hotkeyRow = (label: string, hint: string, hotkey: string, patch: (hotkey: string) => Partial<Settings>) => (
+    <Option label={label} hint={hint}>
+      <HotkeyField
+        value={hotkey}
+        working={!taken.includes(hotkey)}
+        onChange={(next) => change(patch(next))}
+        onResume={checkHotkeys}
+      />
+    </Option>
+  );
 
   const pickFolder = async () => {
     const folder = await open({ directory: true, defaultPath: settings?.folder ?? defaultFolder });
@@ -58,14 +86,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <>
           <h3>Recording</h3>
           <div className="options">
-            <Option label="Hotkey" hint="Starts and stops recording from anywhere, games included.">
-              <HotkeyField
-                value={settings.hotkey}
-                working={hotkeyOk}
-                onChange={(hotkey) => change({ hotkey })}
-                onResume={checkHotkey}
-              />
-            </Option>
+            {hotkeyRow("Hotkey", "Starts and stops recording from anywhere, games included.", settings.hotkey, (hotkey) => ({
+              hotkey,
+            }))}
             <Option label="Screen">
               <select
                 value={settings.screen ?? ""}
@@ -130,6 +153,50 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </Option>
           </div>
 
+          <h3>Instant replay</h3>
+          <p className="hint">
+            Keeps the last stretch of the screen in memory, ready to save. It uses the screen, frame rate, game sound and
+            folder above. Recording stops it and clears what it holds; it starts afresh when the recording's done.
+          </p>
+          <div className="options">
+            {hotkeyRow("Start", "Starts it from anywhere.", settings.replayStartHotkey, (replayStartHotkey) => ({
+              replayStartHotkey,
+            }))}
+            {hotkeyRow("Stop", "Stops it from anywhere.", settings.replayStopHotkey, (replayStopHotkey) => ({
+              replayStopHotkey,
+            }))}
+            {hotkeyRow("Save", "Saves what it holds from anywhere.", settings.replaySaveHotkey, (replaySaveHotkey) => ({
+              replaySaveHotkey,
+            }))}
+            <Option
+              label="Length"
+              hint={`Uses up to about ${formatMemory(
+                replayMemory(settings.replaySeconds, settings.gameSound, settings.replayMicrophone),
+              )} of memory while it's on.`}
+            >
+              <select value={settings.replaySeconds} onChange={(e) => change({ replaySeconds: Number(e.target.value) })}>
+                {REPLAY_LENGTHS.map(([seconds, label]) => (
+                  <option key={seconds} value={seconds}>
+                    {label}
+                  </option>
+                ))}
+                {!REPLAY_LENGTHS.some(([seconds]) => seconds === settings.replaySeconds) && (
+                  <option value={settings.replaySeconds}>{settings.replaySeconds} seconds</option>
+                )}
+              </select>
+            </Option>
+            <Option label="Microphone" hint="Off by default: it would be listening for as long as replay is on.">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={settings.replayMicrophone}
+                  onChange={(e) => change({ replayMicrophone: e.target.checked })}
+                />
+                Include the microphone
+              </label>
+            </Option>
+          </div>
+
           <h3>Window</h3>
           <label className="check">
             <input
@@ -137,7 +204,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               checked={settings.keepRunning}
               onChange={(e) => change({ keepRunning: e.target.checked })}
             />
-            Keep running in the tray when the window is closed, so the hotkey still works
+            Keep running in the tray when the window is closed, so the hotkeys still work
           </label>
         </>
       )}
@@ -149,6 +216,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       </footer>
     </dialog>
   );
+}
+
+function formatMemory(megabytes: number) {
+  return megabytes < 1000 ? `${megabytes} MB` : `${(megabytes / 1000).toFixed(1)} GB`;
 }
 
 function describeScreen(screen: Screen, i: number) {
@@ -212,14 +283,14 @@ function HotkeyField(props: {
   /** Whether it's relight's, rather than another program's. */
   working: boolean;
   onChange: (hotkey: string) => void;
-  /** The hotkey is back on after listening. */
+  /** The hotkeys are back on after listening. */
   onResume: () => void;
 }) {
   const { value, working, onChange, onResume } = props;
   const [listening, setListening] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
-  // The hotkey is let go of while listening, so pressing it here doesn't start recording.
+  // The hotkeys are let go of while listening, so pressing one here doesn't start anything.
   const paused = useRef(false);
   const pause = (on: boolean) => {
     if (paused.current === on) return;
@@ -228,7 +299,7 @@ function HotkeyField(props: {
       .catch(() => {})
       .finally(() => !on && onResume());
   };
-  // Closing the dialog while listening doesn't blur the field: take the hotkey back then too.
+  // Closing the dialog while listening doesn't blur the field: take the hotkeys back then too.
   useEffect(() => () => pause(false), []);
 
   const press = (e: ReactKeyboardEvent<HTMLButtonElement>) => {

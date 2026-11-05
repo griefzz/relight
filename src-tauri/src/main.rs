@@ -3,8 +3,10 @@
 
 //! The relight app: the window's commands, and the tray, hotkey and settings around them.
 //! The work itself is in the crates: `relight-media` (rendering, exporting, previews) and
-//! `relight-recorder` (screen recording), both running ffmpeg through `relight-ffmpeg`.
+//! `relight-recorder` (screen recording and instant replay), both running ffmpeg through
+//! `relight-ffmpeg`.
 
+mod chime;
 mod export;
 mod media;
 mod process;
@@ -29,9 +31,9 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        recording::toggle(app);
+                        settings::hotkey_pressed(app, shortcut);
                     }
                 })
                 .build(),
@@ -68,6 +70,10 @@ fn main() {
             settings::hotkey_working,
             recording::toggle_recording,
             recording::recorder_status,
+            recording::replay_start,
+            recording::replay_stop,
+            recording::replay_save,
+            recording::replay_status,
             recording::recording_sources,
         ])
         .run(tauri::generate_context!())

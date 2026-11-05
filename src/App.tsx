@@ -2,15 +2,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message } from "@tauri-apps/plugin-dialog";
-import { initialFile, isExporting, onOpenFile, onQuitRequested, onRecorded, onRecorderError, quitApp, takeNotice } from "./api";
+import {
+  initialFile,
+  isExporting,
+  onOpenFile,
+  onQuitRequested,
+  onRecorded,
+  onRecorderError,
+  onReplaySaved,
+  openMedia,
+  quitApp,
+  takeNotice,
+} from "./api";
 import { clipLength, totalLength } from "./editor/clips";
 import { chooseProject, okToDiscard, openPaths, saveProject, startNewProject } from "./editor/files";
 import { useShortcuts } from "./editor/shortcuts";
-import { seek, useEditor } from "./editor/store";
+import { addSavedReplay, seek, useEditor } from "./editor/store";
 import { ExportDialog } from "./export/ExportDialog";
 import { Viewer } from "./player/Viewer";
 import { RecordButton } from "./recording/RecordButton";
 import { followRecorder, useRecording } from "./recording/recorder";
+import { ReplayButtons } from "./recording/ReplayButtons";
 import { SettingsDialog } from "./recording/SettingsDialog";
 import { MediaBin } from "./timeline/MediaBin";
 import { requestPreviews } from "./timeline/previews";
@@ -23,7 +35,9 @@ import { followUpdates } from "./updates/updates";
 /** Something to leave running in the background: what to wait for before closing. */
 async function stillGoing() {
   if (await isExporting()) return "An export is still running. Cancel it first, then close.";
-  if (useRecording.getState().status.state !== "idle") return "A recording is still going. Stop it first, then close.";
+  const { status, replay } = useRecording.getState();
+  if (status.state !== "idle") return "A recording is still going. Stop it first, then close.";
+  if (replay.state === "on" && replay.saving) return "A replay is still being saved. Wait for it, then close.";
   return null;
 }
 
@@ -74,6 +88,13 @@ export default function App() {
           const { clips } = useEditor.getState();
           seek(totalLength(clips) - clipLength(clips[clips.length - 1]));
           if (recorded.warnings.length) throw new Error(`Recorded, but:\n${recorded.warnings.join("\n")}`);
+        }),
+      ),
+      // A saved replay waits in the bin: it may be one of many, saved from inside a game.
+      onReplaySaved((saved) =>
+        attempt(async () => {
+          addSavedReplay(await openMedia(saved.path));
+          if (saved.warnings.length) throw new Error(`Replay saved, but:\n${saved.warnings.join("\n")}`);
         }),
       ),
       onRecorderError(report),
@@ -169,6 +190,7 @@ export default function App() {
         </span>
         <div className="spacer" />
         <UpdateButton onError={report} />
+        <ReplayButtons />
         <RecordButton />
         <button className="icon" onClick={() => setShowSettings(true)} title="Settings (Ctrl+,)" aria-label="Settings">
           <GearIcon />

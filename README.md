@@ -27,7 +27,8 @@ copy from `npm run install-cli`, whichever comes first on the PATH wins:
 
 **Editing.** One track; clips play end to end. Split, trim by dragging an edge, move by
 dragging, copy/cut/paste, undo/redo. Drag videos in from the media bin. Clips show
-thumbnails and a waveform.
+thumbnails and a waveform. **×** on a video in the bin takes it out of the project, along
+with its clips (undo brings them back); the file itself stays where it is.
 
 **Projects.** Saved as `.relight` files (JSON). They point to the media instead of copying
 it. If files have moved, relight asks where they are.
@@ -51,6 +52,33 @@ above the first clip's.
   **Quit** is in the tray menu.
 - **Hotkey does nothing?** Another program holds it. Windows gives a hotkey to only one
   program (ZoomIt uses Ctrl + 5, for example).
+
+## Instant replay
+
+Keeps the last stretch of the screen in memory, so you can save something after it's
+happened. Nothing reaches the disk until you save.
+
+| Hotkey | Does |
+| --- | --- |
+| Alt + F6 | Start it |
+| Alt + F7 | Stop it, and let go of what it holds |
+| Alt + F8 | Save the last 30 seconds |
+
+- The hotkeys work from anywhere, and are in Settings along with the length (30 seconds by
+  default, up to 5 minutes). **Replay** in the top bar and the tray menu do the same.
+- It uses the recording settings for the screen, frame rate and game sound. The screen the
+  mouse is on means the one it's on when replay starts. The microphone is off unless you
+  turn it on under Instant replay in Settings.
+- Saving takes a couple of seconds, as the newest frames are still being encoded. A chime
+  says it's on its way (a lower one if it failed), the window stays out of the way of your
+  game, and the clip goes in `Videos\relight` and the media bin. A clip is the length asked
+  for and up to 2 seconds more, as it has to start on a keyframe.
+- Without an NVIDIA card it encodes with x264 on the CPU, all the time it's on, which can
+  slow a game down; relight says so when it starts.
+- Starting a recording stops replay and clears what it holds; a fresh one starts when the
+  recording's done.
+- If the screen capture stops (a game changing the display mode, the screen locking, the
+  PC sleeping) it starts again by itself, and what it held is gone.
 
 ## Keys
 
@@ -118,7 +146,7 @@ The ffmpeg the installers ship with is a pinned build from
   version means taking its template and adding that line back.
 - `crates/ffmpeg`: finding and running ffmpeg and ffprobe
 - `crates/media`: timeline rendering, export presets (including Discord), thumbnails and waveforms
-- `crates/recorder`: screen and sound capture
+- `crates/recorder`: screen and sound capture, for recordings and instant replay
 
 ## License
 

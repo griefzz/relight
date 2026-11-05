@@ -1,6 +1,6 @@
 [package]
 name = "relight-recorder"
-description = "Recording the screen (ddagrab and NVENC) and its sound (WASAPI) into an MP4"
+description = "Recording the screen (ddagrab and NVENC) and its sound (WASAPI) into an MP4, or holding the newest stretch of them for instant replay"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

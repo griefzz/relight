@@ -1,5 +1,5 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
-import { importMedia } from "../editor/files";
+import { importMedia, removeFromProject } from "../editor/files";
 import { fileName, formatLength } from "../ui/format";
 import { colorFor } from "../ui/palette";
 import { dropTarget, follow } from "./pointer";
@@ -66,9 +66,20 @@ export function MediaBin({ onError }: { onError: (error: unknown) => void }) {
                   {formatLength(info.duration)}
                 </span>
               </span>
-              <button className="icon small" title="Insert at the playhead" onClick={() => insertMedia(info.path)}>
-                +
-              </button>
+              <span className="bin-actions">
+                <button className="icon small" title="Insert at the playhead" onClick={() => insertMedia(info.path)}>
+                  +
+                </button>
+                <button
+                  className="icon small"
+                  title="Remove from the project (the file stays where it is)"
+                  aria-label={`Remove ${fileName(info.path)} from the project`}
+                  onClick={() => removeFromProject(info.path).catch(onError)}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  ×
+                </button>
+              </span>
             </li>
           ))}
         </ul>

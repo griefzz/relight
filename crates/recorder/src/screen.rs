@@ -1,7 +1,8 @@
 //! The picture side of a recording: which screens there are, and ffmpeg capturing one.
 
 use std::path::Path;
-use std::sync::mpsc;
+use std::process::ChildStdout;
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,6 +11,8 @@ use ffmpeg_sidecar::event::{FfmpegEvent, LogLevel};
 use serde::Serialize;
 
 use relight_ffmpeg::{args, command, last_lines, start_failed};
+
+use crate::chunks::{Clock, KEYFRAME_SECONDS};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +86,77 @@ pub fn under_mouse(_screens: &[Screen]) -> Option<u32> {
 /// changes no timestamps: it's what the separately captured sound is lined up against.
 const FIRST_FRAME_TIME: &str = r"setpts='PTS+0*if(eq(N\,0)\,print(RTCTIME)\,0)'";
 
+/// Prints when the first frame was by the wall clock, going by the frame at hand, every
+/// `every` frames. For a replay, which can run for hours: the picture's timestamps slowly
+/// drift from the wall clock the sound is placed by.
+fn origin_time(every: u32) -> String {
+    format!(r"setpts='PTS+0*if(eq(mod(N\,{every})\,0)\,print(RTCTIME-(T-STARTT)*1000000)\,0)'")
+}
+
+/// Reads ffmpeg's log on its own thread: gives the wall-clock times printed to `on_time`, and
+/// the first of them to the receiver returned too, once it's really going. The first frame
+/// is printed before the encoder is opened, so that alone doesn't say it can encode: only
+/// its output being opened does. The thread ends with the errors it saw.
+fn read_log(
+    child: &mut FfmpegChild,
+    on_time: impl Fn(f64) + Send + 'static,
+) -> Result<(thread::JoinHandle<Vec<String>>, mpsc::Receiver<f64>), String> {
+    const ERRORS_KEPT: usize = 64;
+    let events = child.iter().map_err(|e| e.to_string())?;
+    let (first_tx, first_rx) = mpsc::channel();
+    let log = thread::spawn(move || {
+        let mut errors = Vec::new();
+        let mut first_time = None;
+        let mut output_open = false;
+        let mut first = Some(first_tx);
+        for event in events {
+            match event {
+                FfmpegEvent::Log(level, line) => match wall_clock(&line) {
+                    Some(time) => {
+                        on_time(time);
+                        first_time.get_or_insert(time);
+                    }
+                    None if matches!(level, LogLevel::Error | LogLevel::Fatal) => errors.push(line),
+                    None => {}
+                },
+                FfmpegEvent::ParsedOutput(_) => output_open = true,
+                FfmpegEvent::Error(e) => errors.push(e),
+                _ => {}
+            }
+            if output_open
+                && let Some(time) = first_time
+                && let Some(tx) = first.take()
+            {
+                let _ = tx.send(time);
+            }
+            // A replay's ffmpeg may be at it for hours.
+            if errors.len() > ERRORS_KEPT {
+                errors.drain(..ERRORS_KEPT / 2);
+            }
+        }
+        errors
+    });
+    Ok((log, first_rx))
+}
+
+/// Waits for the first frame; without one in good time, ffmpeg has given up (its log thread
+/// ended) or never got going, so it's ended, and the error says what it said.
+fn wait_for_first_frame(
+    child: &mut FfmpegChild,
+    log: thread::JoinHandle<Vec<String>>,
+    first: &mpsc::Receiver<f64>,
+) -> Result<(f64, thread::JoinHandle<Vec<String>>), String> {
+    match first.recv_timeout(Duration::from_secs(10)) {
+        Ok(time) => Ok((time, log)),
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let errors = log.join().unwrap_or_default();
+            Err(format!("Couldn't record the screen:\n{}", last_lines(&errors, 8)))
+        }
+    }
+}
+
 /// ffmpeg recording a screen into a fragmented MP4, which stays playable even if relight
 /// stops without finishing it.
 pub struct Capture {
@@ -126,40 +200,9 @@ impl Capture {
             .args(args!["-f", "mp4", "-movflags", "+frag_keyframe+empty_moov+default_base_moof", out])
             .spawn()
             .map_err(start_failed)?;
-        let events = child.iter().map_err(|e| e.to_string())?;
-
-        let (first_tx, first_rx) = mpsc::channel();
-        let log = thread::spawn(move || {
-            let mut errors = Vec::new();
-            let mut first = Some(first_tx);
-            for event in events {
-                match event {
-                    FfmpegEvent::Log(level, line) => match wall_clock(&line) {
-                        Some(time) => {
-                            if let Some(tx) = first.take() {
-                                let _ = tx.send(time);
-                            }
-                        }
-                        None if matches!(level, LogLevel::Error | LogLevel::Fatal) => errors.push(line),
-                        None => {}
-                    },
-                    FfmpegEvent::Error(e) => errors.push(e),
-                    _ => {}
-                }
-            }
-            errors
-        });
-
-        // No first frame means ffmpeg gave up (its log thread ended) or never got going.
-        match first_rx.recv_timeout(Duration::from_secs(10)) {
-            Ok(first_frame) => Ok(Self { child, log, first_frame }),
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let errors = log.join().unwrap_or_default();
-                Err(format!("Couldn't record the screen:\n{}", last_lines(&errors, 8)))
-            }
-        }
+        let (log, first) = read_log(&mut child, |_| {})?;
+        let (first_frame, log) = wait_for_first_frame(&mut child, log, &first)?;
+        Ok(Self { child, log, first_frame })
     }
 
     /// Asks ffmpeg to finish the file and waits for it, giving up on it after a while.
@@ -182,6 +225,89 @@ impl Capture {
             return Ok(());
         }
         Err(format!("The screen recording didn't finish cleanly:\n{}", last_lines(&errors, 8)))
+    }
+}
+
+/// Where a replay's picture comes from.
+#[derive(Debug, Clone, Copy)]
+pub enum Source {
+    /// A screen, by its DXGI output number.
+    Screen(u32),
+    /// A test pattern in real time, lasting this many seconds.
+    #[cfg(test)]
+    Pattern { lasting: f64 },
+    /// A black picture in real time, flashing white for a moment 0.7 s into every 3 s: not
+    /// in step with the chunks, so being a chunk out shows.
+    #[cfg(test)]
+    Flashes,
+    /// A test pattern on a PC where the NVIDIA encoder won't open.
+    #[cfg(test)]
+    NoNvidia,
+}
+
+/// The most a replay's picture uses, in bits a second and the window that's held to over.
+/// Without a limit, what it holds in memory would have no limit either.
+const STREAM_MAX_RATE: &str = "50M";
+const STREAM_RATE_WINDOW: &str = "100M";
+
+/// ffmpeg capturing a picture and sending it down a pipe, as a replay holds it: encoded
+/// more cheaply than a recording as it's always going, and with no B-frames, so a chunk's
+/// timestamp is when its first frame was.
+pub struct Stream {
+    child: FfmpegChild,
+    log: thread::JoinHandle<Vec<String>>,
+}
+
+impl Stream {
+    /// Starts it on NVENC or x264; returns once the first frame is in, with the stream to
+    /// read. What ffmpeg prints about the time goes into `clock`.
+    pub fn start(source: Source, fps: u32, nvenc: bool, clock: Arc<Clock>) -> Result<(Self, ChildStdout), String> {
+        let keyframes = (fps * KEYFRAME_SECONDS).to_string();
+        let origin = origin_time(fps * KEYFRAME_SECONDS);
+        let picture = match source {
+            Source::Screen(screen) if nvenc => format!("ddagrab=output_idx={screen}:framerate={fps}:draw_mouse=1,{origin}"),
+            Source::Screen(screen) => {
+                format!("ddagrab=output_idx={screen}:framerate={fps}:draw_mouse=1,hwdownload,format=bgra,{origin}")
+            }
+            #[cfg(test)]
+            Source::Pattern { lasting } => format!("testsrc2=size=320x180:rate={fps}:duration={lasting},realtime,{origin}"),
+            #[cfg(test)]
+            Source::Flashes => format!(
+                r"color=black:size=320x180:rate={fps}:duration=3600,drawbox=t=fill:c=white:enable='between(mod(t\,3)\,0.7\,0.9)',realtime,{origin}"
+            ),
+            #[cfg(test)]
+            Source::NoNvidia => format!("testsrc2=size=320x180:rate={fps}:duration=3600,realtime,{origin}"),
+        };
+        let codec = if nvenc {
+            args!["-c:v", "h264_nvenc", "-preset", "p2", "-tune", "ll", "-rc", "vbr", "-cq", "19", "-b:v", "0", "-bf", "0"]
+        } else {
+            args!["-c:v", "libx264", "-preset", "superfast", "-tune", "zerolatency", "-crf", "20", "-pix_fmt", "yuv420p"]
+        };
+        // An encoder that takes the first frame and then fails to open, as NVENC does without a card for it.
+        #[cfg(test)]
+        let codec = if nvenc && matches!(source, Source::NoNvidia) { args!["-c:v", "libx264", "-preset", "nonsense"] } else { codec };
+        let mut child = command()
+            .hide_banner()
+            .overwrite()
+            .args(args!["-f", "lavfi", "-i", picture])
+            .args(args!["-fps_mode", "cfr", "-r", fps.to_string()])
+            .args(codec)
+            .args(args!["-maxrate", STREAM_MAX_RATE, "-bufsize", STREAM_RATE_WINDOW, "-g", keyframes])
+            .args(args!["-f", "mp4", "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "pipe:1"])
+            .spawn()
+            .map_err(start_failed)?;
+        // Taken before the log's read, which would otherwise take it as a stream of its own.
+        let stdout = child.take_stdout().ok_or("Couldn't read what ffmpeg captured.")?;
+        let (log, first) = read_log(&mut child, move |time| clock.add(time))?;
+        let (_, log) = wait_for_first_frame(&mut child, log, &first)?;
+        Ok((Self { child, log }, stdout))
+    }
+
+    /// Ends it at once: nothing's being written that wants finishing.
+    pub fn stop(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = self.log.join();
     }
 }
 

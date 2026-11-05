@@ -5,7 +5,11 @@
 //! output device plays, and a microphone. Each is written against the wall clock from the
 //! moment recording starts, and ffmpeg reports the wall-clock time of its first frame, so
 //! when it stops the sound is trimmed to start with the picture.
+//!
+//! A `Replay` captures the same things but only holds the newest stretch, in memory.
 
+mod chunks;
+mod replay;
 mod save;
 mod screen;
 mod sound;
@@ -15,9 +19,10 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use relight_ffmpeg::{Partial, Scratch};
+use relight_ffmpeg::{Job, Partial, Scratch};
 use serde::Serialize;
 
+pub use replay::{Replay, Saver};
 pub use screen::Screen;
 pub use sound::Devices;
 use screen::Capture;
@@ -159,7 +164,9 @@ fn record(
     let started_at = started.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64();
     let lead = (first_frame / 1e6 - started_at).max(0.0);
     let partial = Partial::new(output);
-    let saved = save::combine(&picture, lead, &sound, partial.path()).and_then(|()| partial.finish());
+    let saved = relight_ffmpeg::probe(&picture)
+        .and_then(|info| save::combine(&picture, lead, info.duration, &sound, partial.path(), &Job::silent()))
+        .and_then(|()| partial.finish());
     match saved {
         Ok(()) => {
             warnings.extend(capture_problem);

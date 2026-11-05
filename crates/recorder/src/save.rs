@@ -7,11 +7,11 @@ use relight_ffmpeg::{self as ffmpeg, Job, args};
 
 use crate::sound;
 
-/// Puts the picture and sound together in `output`, the sound starting `lead` seconds in,
-/// where the picture does. With more than one source, the first track is them mixed (it's
-/// what players and the editor play) and each follows on its own, to balance later.
-pub fn combine(picture: &Path, lead: f64, tracks: &[sound::Recorded], output: &Path) -> Result<(), String> {
-    let length = ffmpeg::probe(picture)?.duration;
+/// Puts `length` seconds of the picture and sound together in `output`, the sound starting
+/// `lead` seconds in, where the picture does. With more than one source, the first track is
+/// them mixed (it's what players and the editor play) and each follows on its own, to
+/// balance later.
+pub fn combine(picture: &Path, lead: f64, length: f64, tracks: &[sound::Recorded], output: &Path, job: &Job) -> Result<(), String> {
     let mut args = args!["-i", picture];
     for track in tracks {
         args.extend(args![
@@ -53,7 +53,7 @@ pub fn combine(picture: &Path, lead: f64, tracks: &[sound::Recorded], output: &P
         args.extend(args![format!("-metadata:s:a:{i}"), format!("title={title}")]);
     }
     args.extend(args!["-movflags", "+faststart", "-f", "mp4", output]);
-    ffmpeg::run(&Job::silent(), "saving the recording", length, args)
+    ffmpeg::run(job, "saving the recording", length, args)
 }
 
 /// How ffmpeg names the usual Windows speaker layout for `channels`.

@@ -117,6 +117,16 @@ export interface Settings {
   gameDevice: string | null;
   microphone: boolean;
   micDevice: string | null;
+  /** Starts instant replay from anywhere. */
+  replayStartHotkey: string;
+  /** Stops instant replay from anywhere. */
+  replayStopHotkey: string;
+  /** Saves what instant replay holds from anywhere. */
+  replaySaveHotkey: string;
+  /** How much instant replay holds. */
+  replaySeconds: number;
+  /** Whether instant replay holds the microphone too. */
+  replayMicrophone: boolean;
   /** Where recordings go; null for a relight folder in Videos. */
   folder: string | null;
   /** Closing the window leaves relight in the tray, so the hotkey still works. */
@@ -128,11 +138,11 @@ export const getSettings = () => invoke<Settings>("get_settings");
 /** Saves the settings; fails, changing nothing, if a new hotkey can't be had. */
 export const setSettings = (next: Settings) => invoke<Settings>("set_settings", { next });
 
-/** Lets go of the hotkey while a new one is typed in (so it doesn't start recording), and takes it back. */
+/** Lets go of the hotkeys while a new one is typed in (so it doesn't start anything), and takes them back. */
 export const pauseHotkey = (paused: boolean) => invoke<void>("pause_hotkey", { paused });
 
-/** Whether the hotkey is relight's: not if another program had it first. */
-export const hotkeyWorking = () => invoke<boolean>("hotkey_working");
+/** Whether this hotkey is relight's: not if another program had it first. */
+export const hotkeyWorking = (hotkey: string) => invoke<boolean>("hotkey_working", { hotkey });
 
 export interface Screen {
   index: number;
@@ -174,6 +184,31 @@ export const onRecorded = (handle: (recorded: Recorded) => void) =>
 
 export const onRecorderError = (handle: (error: string) => void) =>
   listen<string>("recorder-error", (event) => handle(event.payload));
+
+// Instant replay
+
+export type ReplayStatus =
+  | { state: "off" }
+  | { state: "starting" }
+  /** `interrupted`: the screen capture has ended and is waiting to start again. */
+  | { state: "on"; saving: boolean; interrupted: boolean }
+  /** Off for a recording, to start afresh when that's done. */
+  | { state: "paused" };
+
+export const replayStatus = () => invoke<ReplayStatus>("replay_status");
+
+export const startReplay = () => invoke<void>("replay_start");
+
+export const stopReplay = () => invoke<void>("replay_stop");
+
+/** Saves what it holds; `onReplaySaved` says when that's done. */
+export const saveReplay = () => invoke<void>("replay_save");
+
+export const onReplay = (handle: (status: ReplayStatus) => void) =>
+  listen<ReplayStatus>("replay", (event) => handle(event.payload));
+
+export const onReplaySaved = (handle: (saved: Recorded) => void) =>
+  listen<Recorded>("replay-saved", (event) => handle(event.payload));
 
 // The app
 

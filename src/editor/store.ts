@@ -24,6 +24,8 @@ const HISTORY = 200;
 interface Editor {
   /** The media bin, by path, in the order it was added. */
   media: Record<string, MediaInfo>;
+  /** What's been taken out of the bin, for undoing back to clips of it. */
+  removedMedia: Record<string, MediaInfo>;
   clips: Clip[];
   past: Clip[][];
   future: Clip[][];
@@ -41,6 +43,7 @@ interface Editor {
 
 const blank: Editor = {
   media: {},
+  removedMedia: {},
   clips: [],
   past: [],
   future: [],
@@ -79,6 +82,40 @@ function commit(clips: Clip[], then: Partial<Editor> = {}) {
 
 export function addMedia(info: MediaInfo) {
   set((s) => ({ media: { ...s.media, [info.path]: info }, dirty: true }));
+}
+
+/**
+ * Adds a replay saved in the background to the bin. It's already safe on disk, and may have
+ * been saved from a game with relight in the tray, so it doesn't count as an unsaved change
+ * to be asked about on quitting.
+ */
+export function addSavedReplay(info: MediaInfo) {
+  set((s) => ({ media: { ...s.media, [info.path]: info } }));
+}
+
+/** How many clips on the timeline are of `path`. */
+export const clipsOf = (path: string) => get().clips.filter((clip) => clip.path === path).length;
+
+/**
+ * Takes a video out of the bin, and its clips off the timeline (the rest close up), which
+ * can be undone. The file itself isn't touched.
+ */
+export function removeMedia(path: string) {
+  const { media, removedMedia, clips, clipboard, selection } = get();
+  const info = media[path];
+  if (!info) return;
+  const rest = { ...media };
+  delete rest[path];
+  const kept = clips.filter((clip) => clip.path !== path);
+  const then = {
+    media: rest,
+    removedMedia: { ...removedMedia, [path]: info },
+    clipboard: clipboard.filter((clip) => clip.path !== path),
+    selection: selection.filter((id) => kept.some((clip) => clip.id === id)),
+    dirty: true,
+  };
+  if (kept.length < clips.length) commit(kept, then);
+  else set(then);
 }
 
 const wholeClip = (path: string): Clip | null => {
@@ -184,7 +221,13 @@ export function endDrag() {
 
 function restore(clips: Clip[], past: Clip[][], future: Clip[][]) {
   const s = get();
+  // Clips coming back of a video taken out of the bin bring it back too.
+  const returning = clips.map((clip) => clip.path).filter((path) => !s.media[path] && s.removedMedia[path]);
+  const media = returning.length
+    ? { ...s.media, ...Object.fromEntries(returning.map((path) => [path, s.removedMedia[path]])) }
+    : s.media;
   set({
+    media,
     clips,
     past,
     future,

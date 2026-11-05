@@ -109,7 +109,7 @@ pub fn make(dir: &Path, source: &Path) -> Result<Previews, String> {
     for n in 0..info.sources().map_or(0, <[String]>::len) {
         let track = n + 1;
         let sound = dir.join(format!("{key}.source{n}.m4a"));
-        ffmpeg::run(&Job::silent(), "copying out a sound track", 0.0, args![
+        ffmpeg::run(&Job::silent().in_background(), "copying out a sound track", 0.0, args![
             "-i", source, "-map", format!("0:a:{track}"), "-vn", "-c", "copy", "-f", "mp4", &sound,
         ])?;
         let peaks = dir.join(format!("{key}.source{n}.peaks"));
@@ -133,7 +133,8 @@ fn make_strip(source: &Path, tiles: u32, step: f64, tile_width: u32, strip: &Pat
     let tile = |i: u32| scratch.path().join(format!("{i:03}.jpg"));
     let next = AtomicU32::new(0);
     let failure = Mutex::new(None);
-    let job = Job::silent();
+    // A replay saved mid-game gets these too: they give way to the game.
+    let job = Job::silent().in_background();
     thread::scope(|threads| {
         for _ in 0..THUMBNAILERS {
             threads.spawn(|| {
