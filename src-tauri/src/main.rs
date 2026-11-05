@@ -56,6 +56,7 @@ fn main() {
             window::initial_file,
             window::take_notice,
             window::updates_on,
+            process::let_children_outlive,
             window::quit,
             window::unload_to_tray,
             window::take_editor,

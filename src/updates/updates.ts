@@ -6,7 +6,7 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
-import { updatesOn } from "../api";
+import { letChildrenOutlive, updatesOn } from "../api";
 
 const EVERY = 6 * 60 * 60 * 1000;
 
@@ -47,10 +47,20 @@ export function followUpdates(): () => void {
   };
 }
 
-/** Installs the update and starts the new version. On Windows the installer closes relight itself. */
+/**
+ * Installs the update and starts the new version. On Windows `install` never comes back: it
+ * starts the installer and ends relight, and the installer starts the new version. So the
+ * installer has to be let out of what ends everything relight started.
+ */
 export async function installUpdate() {
   const update = useUpdate.getState().ready;
   if (!update) return;
-  await update.install();
-  await relaunch();
+  await letChildrenOutlive(true);
+  try {
+    await update.install();
+    await relaunch();
+  } catch (e) {
+    await letChildrenOutlive(false).catch(() => {});
+    throw e;
+  }
 }
