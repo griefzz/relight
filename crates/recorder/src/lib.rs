@@ -6,7 +6,8 @@
 //! moment recording starts, and ffmpeg reports the wall-clock time of its first frame, so
 //! when it stops the sound is trimmed to start with the picture.
 //!
-//! A `Replay` captures the same things but only holds the newest stretch, in memory.
+//! A `Replay` captures the same things but only holds the newest stretch, in memory or, if
+//! it's asked to bounce, with the picture on disk.
 
 mod chunks;
 mod replay;

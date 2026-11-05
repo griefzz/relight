@@ -3,7 +3,7 @@ import { join, videoDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { hotkeyWorking, pauseHotkey, recordingSources, type Screen, type Settings, type Sources } from "../api";
 import { Option, Segmented } from "../ui/controls";
-import { changeSettings, replayMemory, useRecording } from "./recorder";
+import { changeSettings, replayDisk, replayMemory, useRecording } from "./recorder";
 
 /** How long instant replay can hold, in seconds. */
 const REPLAY_LENGTHS: [number, string][] = [
@@ -155,8 +155,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
           <h3>Instant replay</h3>
           <p className="hint">
-            Keeps the last stretch of the screen in memory, ready to save. It uses the screen, frame rate, game sound and
-            folder above. Recording stops it and clears what it holds; it starts afresh when the recording's done.
+            Keeps the last stretch of the screen {settings.replayBounce ? "on disk" : "in memory"}, ready to save. It uses the
+            screen, frame rate, game sound and folder above. Recording stops it and clears what it holds; it starts afresh when
+            the recording's done.
           </p>
           <div className="options">
             {hotkeyRow("Start", "Starts it from anywhere.", settings.replayStartHotkey, (replayStartHotkey) => ({
@@ -170,9 +171,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             }))}
             <Option
               label="Length"
-              hint={`Uses up to about ${formatMemory(
-                replayMemory(settings.replaySeconds, settings.gameSound, settings.replayMicrophone),
-              )} of memory while it's on.`}
+              hint={`Uses up to about ${formatSize(
+                replayMemory(settings.replaySeconds, settings.gameSound, settings.replayMicrophone, settings.replayBounce),
+              )} of memory${
+                settings.replayBounce ? ` and ${formatSize(replayDisk(settings.replaySeconds))} of disk space` : ""
+              } while it's on.`}
             >
               <select value={settings.replaySeconds} onChange={(e) => change({ replaySeconds: Number(e.target.value) })}>
                 {REPLAY_LENGTHS.map(([seconds, label]) => (
@@ -193,6 +196,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   onChange={(e) => change({ replayMicrophone: e.target.checked })}
                 />
                 Include the microphone
+              </label>
+            </Option>
+            <Option
+              label="Bounce to disk"
+              hint="For long game sessions: frees most of its memory for your game. The picture goes to temporary files as it's captured, so the disk is written to for as long as replay is on. The sound stays in memory."
+            >
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={settings.replayBounce}
+                  onChange={(e) => change({ replayBounce: e.target.checked })}
+                />
+                Keep the picture on disk
               </label>
             </Option>
             <Option label="Sound alert" hint="A lower one if it couldn't be saved. Other replays reaching back that far may pick it up.">
@@ -229,7 +245,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function formatMemory(megabytes: number) {
+function formatSize(megabytes: number) {
   return megabytes < 1000 ? `${megabytes} MB` : `${(megabytes / 1000).toFixed(1)} GB`;
 }
 

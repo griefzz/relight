@@ -59,7 +59,7 @@ above the first clip's.
 ## Instant replay
 
 Keeps the last stretch of the screen in memory, so you can save something after it's
-happened. Nothing reaches the disk until you save.
+happened. Nothing reaches the disk until you save, unless you turn on bounce to disk.
 
 | Hotkey | Does |
 | --- | --- |
@@ -77,6 +77,13 @@ happened. Nothing reaches the disk until you save.
   bin. To hear that it's on its way, turn on the sound alert in Settings: a chime when you
   save, and a lower one if it failed. A clip is the length asked for and up to 2 seconds
   more, as it has to start on a keyframe.
+- Every clip you save is its own file straight away, so saving many costs no extra memory.
+  What memory it uses is the stretch it's holding, ready to save: up to about 220 MB at 30
+  seconds, and 2 GB at 5 minutes.
+- **Bounce to disk**, under Instant replay in Settings, frees most of that for your game on
+  long sessions: the picture goes to temporary files as it's captured, using as much disk
+  space as it would have memory. The sound (a small part of it) stays in memory, and if the
+  disk can't take the picture, it's held in memory instead and saving a clip says so.
 - Without an NVIDIA card it encodes with x264 on the CPU, all the time it's on, which can
   slow a game down; relight says so when it starts.
 - Starting a recording stops replay and clears what it holds; a fresh one starts when the

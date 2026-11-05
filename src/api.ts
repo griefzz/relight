@@ -127,6 +127,8 @@ export interface Settings {
   replaySeconds: number;
   /** Whether instant replay holds the microphone too. */
   replayMicrophone: boolean;
+  /** Whether instant replay keeps its picture on disk rather than in memory. */
+  replayBounce: boolean;
   /** Whether saving a replay plays a sound to say how it went. */
   replayChime: boolean;
   /** Where recordings go; null for a relight folder in Videos. */

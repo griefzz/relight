@@ -1,11 +1,14 @@
 //! The picture a replay holds: ffmpeg's fragmented MP4 stream, split where each fragment
 //! starts. Every fragment starts on a keyframe, so the stream's header followed by any run
 //! of fragments is a video that plays, and the oldest can simply be dropped.
+//!
+//! The fragments are held in memory or, bounced, each in a temporary file of its own.
 
 use std::collections::VecDeque;
+use std::env;
 use std::fs::File;
-use std::io::{self, BufWriter, Read, Write};
-use std::path::Path;
+use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -48,16 +51,47 @@ impl Clock {
 
 /// One fragment of the stream.
 pub struct Chunk {
-    bytes: Vec<u8>,
+    body: Body,
     /// When its first frame was taken, in seconds since 1970.
     start: f64,
     /// In seconds.
     length: f64,
 }
 
+/// Where a chunk's bytes are.
+enum Body {
+    Memory(Vec<u8>),
+    /// In a file of its own, that Windows removes when it's closed, whether by the chunk going
+    /// or by relight crashing. It's marked as temporary, so Windows may hold off writing it out
+    /// while memory's going spare, but gives that memory up to anything that wants it.
+    Disk(Mutex<File>),
+}
+
 impl Chunk {
     fn end(&self) -> f64 {
         self.start + self.length
+    }
+
+    /// Moves its bytes into a new file in `dir`. If that can't be done, they stay where they are.
+    fn bounce(&mut self, dir: &Path) -> io::Result<()> {
+        if let Body::Memory(bytes) = &self.body {
+            let mut file = tempfile::tempfile_in(dir)?;
+            file.write_all(bytes)?;
+            self.body = Body::Disk(Mutex::new(file));
+        }
+        Ok(())
+    }
+
+    fn write_to(&self, out: &mut impl Write) -> io::Result<()> {
+        match &self.body {
+            Body::Memory(bytes) => out.write_all(bytes),
+            // Two saves can want the same chunk, and its file has only the one position.
+            Body::Disk(file) => {
+                let mut file = file.lock().unwrap();
+                file.seek(SeekFrom::Start(0))?;
+                io::copy(&mut *file, out).map(drop)
+            }
+        }
     }
 }
 
@@ -79,7 +113,7 @@ impl Clip {
         let mut out = BufWriter::with_capacity(1 << 20, File::create(path)?);
         out.write_all(&self.header)?;
         for chunk in &self.chunks {
-            out.write_all(&chunk.bytes)?;
+            chunk.write_to(&mut out)?;
         }
         out.flush()
     }
@@ -93,12 +127,16 @@ struct Held {
     /// Goes up when what's held is thrown away.
     cleared: u64,
     closed: bool,
+    /// Why the newest chunk couldn't go to disk, if it couldn't.
+    bounce_problem: Option<String>,
 }
 
-/// The newest stretch of the picture, kept in memory.
+/// The newest stretch of the picture.
 pub struct Picture {
     /// In seconds.
     keep: f64,
+    /// Where chunks go as they arrive; without this, they're held in memory.
+    bounce_to: Option<PathBuf>,
     held: Mutex<Held>,
     arrived: Condvar,
 }
@@ -107,15 +145,22 @@ impl Picture {
     pub fn new(seconds: f64) -> Self {
         Self {
             keep: seconds + EXTRA_SECONDS,
+            bounce_to: None,
             held: Mutex::new(Held {
                 header: Arc::default(),
                 chunks: VecDeque::new(),
                 last_arrival: Instant::now(),
                 cleared: 0,
                 closed: false,
+                bounce_problem: None,
             }),
             arrived: Condvar::new(),
         }
+    }
+
+    /// One that keeps its chunks on disk, leaving only the one arriving in memory.
+    pub fn bounced(seconds: f64) -> Self {
+        Self { bounce_to: Some(env::temp_dir()), ..Self::new(seconds) }
     }
 
     /// A new stream is starting.
@@ -123,9 +168,19 @@ impl Picture {
         self.held.lock().unwrap().header = Arc::new(header);
     }
 
-    fn add(&self, chunk: Chunk) {
+    /// Why chunks are being held in memory despite being meant for the disk, if they are.
+    pub fn bounce_problem(&self) -> Option<String> {
+        self.held.lock().unwrap().bounce_problem.clone()
+    }
+
+    fn add(&self, mut chunk: Chunk) {
+        // Before taking the lock, so no save has to wait for the disk. Nor does ffmpeg: a chunk
+        // comes all at once and then nothing does until the next, so a slow write is no matter.
+        // A failed one costs no more memory than not bouncing would, so the replay carries on.
+        let problem = self.bounce_to.as_ref().and_then(|dir| chunk.bounce(dir).err());
         let oldest_wanted = chunk.end() - self.keep;
         let mut held = self.held.lock().unwrap();
+        held.bounce_problem = problem.map(|e| e.to_string());
         held.chunks.push_back(Arc::new(chunk));
         // The oldest goes once the one after it reaches back far enough by itself.
         while held.chunks.len() > 1 && held.chunks[1].start <= oldest_wanted {
@@ -222,7 +277,7 @@ pub fn follow(mut stream: impl Read, fps: u32, clock: &Clock, picture: &Picture)
                 if let (Some(scale), Some((time, frames)), Some(origin)) = (scale, fragment(&bytes), clock.origin()) {
                     let first = *first_time.get_or_insert(time);
                     picture.add(Chunk {
-                        bytes,
+                        body: Body::Memory(bytes),
                         start: origin + (time - first) as f64 / f64::from(scale),
                         length: f64::from(frames) / f64::from(fps),
                     });
@@ -304,6 +359,8 @@ fn fragment(bytes: &[u8]) -> Option<(u64, u32)> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn boxed(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
@@ -336,7 +393,32 @@ mod tests {
     }
 
     fn chunk(start: f64, length: f64) -> Chunk {
-        Chunk { bytes: vec![start as u8], start, length }
+        Chunk { body: Body::Memory(vec![start as u8]), start, length }
+    }
+
+    fn bytes_of(chunk: &Chunk) -> Vec<u8> {
+        let mut out = Vec::new();
+        chunk.write_to(&mut out).unwrap();
+        out
+    }
+
+    /// A picture bouncing its chunks to `dir`.
+    fn bounced_to(dir: &Path, seconds: f64) -> Picture {
+        Picture { bounce_to: Some(dir.to_owned()), ..Picture::new(seconds) }
+    }
+
+    fn files_in(dir: &Path) -> usize {
+        fs::read_dir(dir).unwrap().count()
+    }
+
+    /// Waits for `dir` to have `count` files, as something else may have one open for a moment
+    /// (a virus scanner) when it's closed here.
+    fn wait_for_files_in(dir: &Path, count: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while files_in(dir) != count && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(files_in(dir), count);
     }
 
     #[test]
@@ -358,7 +440,95 @@ mod tests {
         // The first fragment is the picture's time zero, whatever its timestamp says.
         assert_eq!((held.chunks[0].start, held.chunks[0].length), (1000.0, 2.0));
         assert_eq!((held.chunks[1].start, held.chunks[1].length), (1002.0, 1.0));
-        assert_eq!(held.chunks[0].bytes, fragment_at(5000, 60, b"one"));
+        assert_eq!(bytes_of(&held.chunks[0]), fragment_at(5000, 60, b"one"));
+    }
+
+    #[test]
+    fn bouncing_leaves_no_chunk_in_memory_and_saves_the_very_same_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let stream = [header(), fragment_at(0, 30, b"one"), fragment_at(1000, 30, b"two")].concat();
+        let bounced = bounced_to(dir.path(), 100.0);
+        follow(&stream[..], 30, &clock_at(0.0), &bounced).unwrap();
+
+        {
+            let held = bounced.held.lock().unwrap();
+            assert!(held.chunks.iter().all(|chunk| matches!(chunk.body, Body::Disk(_))));
+        }
+        assert_eq!(files_in(dir.path()), 2);
+        assert_eq!(bounced.bounce_problem(), None);
+
+        let saved = dir.path().join("saved");
+        bounced.clip(2.0, 2.0, Duration::ZERO).unwrap().write(&saved).unwrap();
+        assert_eq!(fs::read(&saved).unwrap(), stream);
+    }
+
+    #[test]
+    fn a_bounced_chunk_can_be_saved_again_and_again_even_at_the_same_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = vec![7; 1 << 20];
+        let stream = [header(), fragment_at(0, 30, &data)].concat();
+        let bounced = bounced_to(dir.path(), 100.0);
+        follow(&stream[..], 30, &clock_at(0.0), &bounced).unwrap();
+
+        std::thread::scope(|scope| {
+            for save in 0..4 {
+                let (bounced, stream, saved) = (&bounced, &stream, dir.path().join(format!("saved {save}")));
+                scope.spawn(move || {
+                    bounced.clip(1.0, 1.0, Duration::ZERO).unwrap().write(&saved).unwrap();
+                    assert!(fs::read(&saved).unwrap() == *stream, "save {save} differs");
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn a_bounced_chunks_file_goes_when_nothing_wants_it_any_more() {
+        let dir = tempfile::tempdir().unwrap();
+        let picture = bounced_to(dir.path(), 4.0); // Keeps 7 seconds, so 4 of these.
+        for i in 0..4 {
+            picture.add(chunk(f64::from(i) * 2.0, 2.0));
+        }
+        wait_for_files_in(dir.path(), 4);
+
+        // The replay moves on past a clip being saved: what it needs stays for it.
+        let clip = picture.clip(8.0, 8.0, Duration::ZERO).unwrap();
+        assert_eq!(clip.chunks.len(), 4);
+        for i in 4..20 {
+            picture.add(chunk(f64::from(i) * 2.0, 2.0));
+        }
+        wait_for_files_in(dir.path(), 8);
+        let saved = tempfile::NamedTempFile::new().unwrap();
+        clip.write(saved.path()).unwrap();
+        assert_eq!(fs::read(saved.path()).unwrap(), [0, 2, 4, 6]);
+
+        drop(clip);
+        wait_for_files_in(dir.path(), 4);
+        picture.clear();
+        wait_for_files_in(dir.path(), 0);
+    }
+
+    #[test]
+    fn a_chunk_that_cant_be_bounced_is_held_in_memory_and_said_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let picture = bounced_to(&dir.path().join("not there"), 100.0);
+        picture.add(chunk(0.0, 2.0));
+        assert!(picture.bounce_problem().is_some());
+        let saved = dir.path().join("saved");
+        picture.clip(2.0, 2.0, Duration::ZERO).unwrap().write(&saved).unwrap();
+        assert_eq!(fs::read(&saved).unwrap(), [0], "the replay still has it");
+
+        // The disk comes back, and so does bouncing.
+        fs::create_dir(dir.path().join("not there")).unwrap();
+        picture.add(chunk(2.0, 2.0));
+        assert_eq!(picture.bounce_problem(), None);
+        assert_eq!(files_in(&dir.path().join("not there")), 1);
+    }
+
+    #[test]
+    fn nothing_is_put_on_disk_unless_bouncing() {
+        let picture = Picture::new(100.0);
+        picture.add(chunk(0.0, 2.0));
+        assert!(matches!(picture.held.lock().unwrap().chunks[0].body, Body::Memory(_)));
     }
 
     #[test]

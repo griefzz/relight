@@ -38,6 +38,9 @@ pub struct Settings {
     /// Whether instant replay holds the microphone too. Separate from a recording's, as it's
     /// listening for as long as replay is on, not just while recording's asked for.
     pub replay_microphone: bool,
+    /// Whether instant replay keeps its picture on disk rather than in memory. Off by default,
+    /// as it means writing to the disk for as long as replay is on.
+    pub replay_bounce: bool,
     /// Whether saving a replay plays a sound to say how it went.
     pub replay_chime: bool,
     /// Where recordings are saved; none for a relight folder in Videos.
@@ -61,6 +64,7 @@ impl Default for Settings {
             replay_save_hotkey: "Alt+F8".into(),
             replay_seconds: 30,
             replay_microphone: false,
+            replay_bounce: false,
             replay_chime: false,
             folder: None,
             keep_running: true,
@@ -95,6 +99,7 @@ impl Settings {
             || self.replay_microphone != next.replay_microphone
             || self.mic_device != next.mic_device
             || self.replay_seconds != next.replay_seconds
+            || self.replay_bounce != next.replay_bounce
     }
 }
 
@@ -253,6 +258,7 @@ mod tests {
         assert_eq!(settings.replay_seconds, 30);
         assert!(!settings.replay_microphone, "the microphone stays off unless asked for");
         assert!(!settings.replay_chime, "the chime stays off unless asked for");
+        assert!(!settings.replay_bounce, "the disk stays out of it unless asked for");
         assert_eq!(settings.replay_save_hotkey, "Alt+F8");
     }
 
@@ -281,6 +287,7 @@ mod tests {
         assert!(!settings.replay_differs(&Settings { replay_chime: true, ..settings.clone() }), "losing what it holds over a sound would be silly");
         assert!(settings.replay_differs(&Settings { replay_seconds: 60, ..settings.clone() }));
         assert!(settings.replay_differs(&Settings { replay_microphone: true, ..settings.clone() }));
+        assert!(settings.replay_differs(&Settings { replay_bounce: true, ..settings.clone() }));
         assert!(settings.replay_differs(&Settings { fps: 30, ..settings.clone() }));
     }
 

@@ -2,6 +2,8 @@
 //! oldest dropping away, until the last stretch of it is asked for and saved.
 //!
 //! Nothing here touches the disk until then, and the sound isn't encoded until then either.
+//! The exception is bouncing, asked for when a long stretch would take too much memory from a
+//! game: the picture, nearly all of what's held, goes to temporary files as it's captured.
 //! Left going for hours, it has to get through what a short recording never meets: a game
 //! changing the display mode, the screen locking, the PC sleeping, a headset unplugged. When
 //! the capture ends it's started again, and what was held goes with it (it might not even be
@@ -47,12 +49,18 @@ pub struct Replay {
 }
 
 impl Replay {
-    /// Starts it, holding the last `seconds`; returns once the first frame is in, with things
-    /// that didn't go as asked. `changed` is called when `is_interrupted` changes.
-    pub fn start(options: Options, seconds: u32, changed: impl Fn() + Send + 'static) -> Result<(Self, Vec<String>), String> {
+    /// Starts it, holding the last `seconds`, its picture on disk if `bounce`; returns once the
+    /// first frame is in, with things that didn't go as asked. `changed` is called when
+    /// `is_interrupted` changes.
+    pub fn start(
+        options: Options,
+        seconds: u32,
+        bounce: bool,
+        changed: impl Fn() + Send + 'static,
+    ) -> Result<(Self, Vec<String>), String> {
         let mut warnings = Vec::new();
         let screen = pick_screen(options.screen, &mut warnings);
-        let (replay, more) = Self::start_from(Source::Screen(screen), options, seconds, changed)?;
+        let (replay, more) = Self::start_from(Source::Screen(screen), options, seconds, bounce, changed)?;
         warnings.extend(more);
         Ok((replay, warnings))
     }
@@ -61,11 +69,12 @@ impl Replay {
         source: Source,
         options: Options,
         seconds: u32,
+        bounce: bool,
         changed: impl Fn() + Send + 'static,
     ) -> Result<(Self, Vec<String>), String> {
         let held = Arc::new(Held {
             seconds: f64::from(seconds),
-            picture: Picture::new(f64::from(seconds)),
+            picture: if bounce { Picture::bounced(f64::from(seconds)) } else { Picture::new(f64::from(seconds)) },
             tapes: Mutex::default(),
             interrupted: AtomicBool::new(false),
         });
@@ -129,6 +138,9 @@ impl Saver {
         let tapes = held.tapes.lock().unwrap().clone();
         let mut sound = Vec::new();
         let mut warnings = Vec::new();
+        if let Some(problem) = held.picture.bounce_problem() {
+            warnings.push(format!("Bounce to disk isn't working, so instant replay is holding the picture in memory: {problem}"));
+        }
         for tape in tapes {
             match tape.save(clip.start, clip.length, scratch.path()) {
                 Ok(saved) => sound.push(saved),
@@ -382,7 +394,7 @@ mod tests {
     #[ignore = "needs ffmpeg"]
     fn the_sound_stays_in_step_with_the_picture() {
         let dir = tempfile::tempdir().unwrap();
-        let (replay, _) = Replay::start_from(Source::Flashes, no_sound(), 8, || {}).unwrap();
+        let (replay, _) = Replay::start_from(Source::Flashes, no_sound(), 8, false, || {}).unwrap();
         // The first chunk is the picture's time zero, which says when that was by the clock.
         thread::sleep(Duration::from_secs(4));
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
@@ -410,7 +422,7 @@ mod tests {
     fn saves_the_last_stretch_as_a_video_with_its_sound_the_same_length() {
         let dir = tempfile::tempdir().unwrap();
         let pattern = Source::Pattern { lasting: 3600.0 };
-        let (replay, warnings) = Replay::start_from(pattern, no_sound(), 4, || {}).unwrap();
+        let (replay, warnings) = Replay::start_from(pattern, no_sound(), 4, false, || {}).unwrap();
         assert!(warnings.iter().all(|w| w.contains("CPU")), "{warnings:?}");
         replay.held.tapes.lock().unwrap().push(Tape::blank("Game"));
 
@@ -431,9 +443,39 @@ mod tests {
 
     #[test]
     #[ignore = "needs ffmpeg"]
+    fn bouncing_to_disk_saves_clip_after_clip_each_a_whole_video_with_its_sound() {
+        let dir = tempfile::tempdir().unwrap();
+        let pattern = Source::Pattern { lasting: 3600.0 };
+        let (replay, _) = Replay::start_from(pattern, no_sound(), 4, true, || {}).unwrap();
+        replay.held.tapes.lock().unwrap().push(Tape::blank("Game"));
+
+        // Long enough for some to have been dropped, and then saved from over a long session.
+        thread::sleep(Duration::from_secs(10));
+        let mut saved = Vec::new();
+        for clip in 0..3 {
+            let output = dir.path().join(format!("replay {clip}.mp4"));
+            let recorded = replay.saver().save(SystemTime::now(), &output).unwrap();
+            assert_eq!(recorded.warnings, Vec::<String>::new());
+            saved.push(output);
+            thread::sleep(Duration::from_secs(3));
+        }
+        replay.stop();
+
+        for output in saved {
+            let info = relight_ffmpeg::probe(&output).unwrap();
+            assert!((3.9..=6.5).contains(&info.duration), "lasts {} s", info.duration);
+            let frames = frames_in(&output);
+            assert!((f64::from(frames) / 30.0 - info.duration).abs() < 0.2, "{frames} frames in {} s", info.duration);
+            let sound = stream_length(&output, "a:0");
+            assert!((sound - info.duration).abs() < 0.1, "{sound} s of sound in {} s", info.duration);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs ffmpeg"]
     fn falls_back_to_x264_when_the_nvidia_encoder_wont_open() {
         let dir = tempfile::tempdir().unwrap();
-        let (replay, warnings) = Replay::start_from(Source::NoNvidia, no_sound(), 5, || {}).unwrap();
+        let (replay, warnings) = Replay::start_from(Source::NoNvidia, no_sound(), 5, false, || {}).unwrap();
         assert!(warnings.iter().any(|w| w.contains("CPU")), "{warnings:?}");
 
         thread::sleep(Duration::from_secs(4));
@@ -449,7 +491,7 @@ mod tests {
     #[ignore = "needs ffmpeg"]
     fn saving_right_after_starting_saves_what_there_is() {
         let dir = tempfile::tempdir().unwrap();
-        let (replay, _) = Replay::start_from(Source::Pattern { lasting: 3600.0 }, no_sound(), 30, || {}).unwrap();
+        let (replay, _) = Replay::start_from(Source::Pattern { lasting: 3600.0 }, no_sound(), 30, false, || {}).unwrap();
         let output = dir.path().join("replay.mp4");
         // Asked for straight away, it waits for the first chunk to finish.
         let saved = replay.saver().save(SystemTime::now() + Duration::from_secs(1), &output);
@@ -465,7 +507,7 @@ mod tests {
         let changes = Arc::new(AtomicUsize::new(0));
         let seen = changes.clone();
         // Its ffmpeg finishes after 3 seconds, as one does when the display mode changes.
-        let (replay, _) = Replay::start_from(Source::Pattern { lasting: 3.0 }, no_sound(), 30, move || {
+        let (replay, _) = Replay::start_from(Source::Pattern { lasting: 3.0 }, no_sound(), 30, false, move || {
             seen.fetch_add(1, Ordering::Relaxed);
         })
         .unwrap();

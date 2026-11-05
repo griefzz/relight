@@ -333,7 +333,7 @@ fn begin_replay(app: &AppHandle, recorder: &Recorder) {
     let settings = app.state::<SettingsState>().get();
     let options = Options { microphone: settings.replay_microphone, ..options(&settings) };
     let changes = app.clone();
-    let started = Replay::start(options, settings.replay_seconds, move || announce(&changes));
+    let started = Replay::start(options, settings.replay_seconds, settings.replay_bounce, move || announce(&changes));
     *recorder.replay.lock().unwrap() = match started {
         Ok((replay, warnings)) => {
             if !warnings.is_empty() {

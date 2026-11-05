@@ -11,9 +11,7 @@ relight-ffmpeg.workspace = true
 cpal.workspace = true
 ffmpeg-sidecar.workspace = true
 serde.workspace = true
+tempfile.workspace = true
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
-
-[dev-dependencies]
-tempfile.workspace = true

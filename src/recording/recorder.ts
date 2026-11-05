@@ -42,9 +42,17 @@ const SOUND_MB_A_SECOND = 0.4;
 const MICROPHONE_MB_A_SECOND = 0.2;
 /** How much more than asked for is held, to start a save on a keyframe. */
 const EXTRA_SECONDS = 3;
+/** How much picture arrives at a time. Bouncing to disk, that's all of it that's in memory. */
+const CHUNK_SECONDS = 2;
 
-/** The most memory instant replay should use, in megabytes. */
-export function replayMemory(seconds: number, gameSound: boolean, microphone: boolean) {
+/** The most memory instant replay should use, in megabytes. Bouncing to disk only takes the picture out. */
+export function replayMemory(seconds: number, gameSound: boolean, microphone: boolean, bounce: boolean) {
+  const held = seconds + EXTRA_SECONDS;
   const sound = (gameSound ? SOUND_MB_A_SECOND : 0) + (microphone ? MICROPHONE_MB_A_SECOND : 0);
-  return Math.round((seconds + EXTRA_SECONDS) * (PICTURE_MB_A_SECOND + sound));
+  return Math.round((bounce ? CHUNK_SECONDS : held) * PICTURE_MB_A_SECOND + held * sound);
+}
+
+/** The most temporary disk space instant replay should use while bouncing to disk, in megabytes. */
+export function replayDisk(seconds: number) {
+  return Math.round((seconds + EXTRA_SECONDS) * PICTURE_MB_A_SECOND);
 }
